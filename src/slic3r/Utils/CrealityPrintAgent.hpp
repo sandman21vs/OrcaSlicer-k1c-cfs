@@ -60,6 +60,13 @@ public:
                                              const std::string&      vendor,
                                              const std::string&      brand_name,
                                              const std::string&      base_type);
+
+private:
+    // Fetch + parse the Klipper `box` object (K1-series CFS such as the K1C) from
+    // Moonraker (/printer/objects/query?box) into AmsTrayData. Returns false when
+    // there is no `box` object or no loaded slots, so callers can fall through to
+    // the K2 WebSocket path / base Moonraker agent.
+    bool fetch_cfs_box_object(std::vector<AmsTrayData>& trays, int& max_slot_index);
 };
 
 } // namespace Slic3r
