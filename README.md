@@ -1,3 +1,33 @@
+# OrcaSlicer — Mod K1C + CFS (fork independente)
+
+> ⚠️ **Fork/mod NÃO-oficial.** Mantido por um desenvolvedor independente. Adiciona suporte ao **CFS (Creality Filament System) da linha K1 (K1C)** no OrcaSlicer — sincronização de filamento, % restante e controle de carregar/descarregar. **O objetivo é, futuramente, abrir um Pull Request para o OrcaSlicer oficial.** Este cabeçalho e a configuração abaixo são específicos deste fork; o README original do OrcaSlicer segue logo após.
+
+## ⚙️ Configuração necessária (importante)
+
+Para o CFS funcionar, em **Dispositivo → Impressora Física**, configure:
+
+- **Tipo de Host:** `CrealityPrint`
+- **Agente de Impressora:** `CrealityPrint` — **troque manualmente!** (pode vir como `Moonraker` por padrão; sem isso o CFS NÃO sincroniza)
+- **Nome do host / IP:** o IP da sua K1C na rede local
+
+![Configuração da Impressora Física](docs/k1c-cfs-sync/img/physical-printer-config.png)
+
+## 🔧 Modificações deste fork
+
+- **Sincronização de filamento do CFS (K1C)** — lê o objeto `box` do Moonraker e mapeia cada slot para o preset correto do OrcaSlicer, com um catálogo de materiais Creality para casar marca/produto (ex.: Hyper PLA, CR-PLA Matte, Hyper ABS).
+- **Separação por linha** — perfis K1C roteados para o agente `crealityprint`; provedores de CFS separados por linha (**K1** via objeto `box` do Moonraker; **K2** via `boxsInfo` no WebSocket porta 9999).
+- **Página de dispositivo da K1** — a aba Dispositivo abre a página web da Creality (porta 80) por padrão na linha K1 (a K2 mantém Mainsail/Fluidd na 4408).
+- **Controle manual de filamento (CFS)** — painel **"CFS filament control"** na barra lateral, com **Feed/Retração** por slot (comando `feedInOrOut` via WebSocket porta 9999, igual ao CrealityPrint).
+- **% de filamento restante** — o restante de cada slot é sincronizado e exibido no rótulo do painel e na **barra de nível** do diálogo de sincronização do AMS.
+
+![Painel de CFS e sincronização](docs/k1c-cfs-sync/img/cfs-panel-sync.png)
+
+> Documentação técnica das mudanças em [`docs/k1c-cfs-sync/`](docs/k1c-cfs-sync).
+
+---
+
+<!-- ===== README original do OrcaSlicer abaixo ===== -->
+
 <div align="center">
 
 <picture>
