@@ -300,11 +300,12 @@ std::string CrealityPrint::query_boxes_info() const
 
 std::string CrealityPrint::get_print_host_webui(DynamicPrintConfig* config)
 {
-    // K-series printers (K2 / K2 Plus / K2 Pro) ship with Mainsail on port 4408.
-    // Port 80 hosts only the Creality control / upload API, which returns 404
-    // for unknown paths and therefore renders as a blank/404 page in Orca's
-    // Device WebView. Default to the Mainsail URL when the user hasn't
-    // explicitly set print_host_webui.
+    // Default Device-tab web UI URL when the user hasn't set print_host_webui.
+    // K1-series boards (K1 / K1C / K1 Max) don't ship Fluidd/Mainsail by default
+    // but serve Creality's own web UI (a Vue SPA) on port 80, so default those to
+    // the bare host. The K2-platform (K2 / K2 Plus / K2 Pro / SPARKX) defaults to
+    // Mainsail/Fluidd on port 4408 (on those boards port 80 is only the control
+    // API and renders blank in the WebView).
     if (config == nullptr)
         return {};
 
@@ -324,6 +325,11 @@ std::string CrealityPrint::get_print_host_webui(DynamicPrintConfig* config)
         host = host.substr(0, slash);
     if (auto colon = host.find(':'); colon != std::string::npos)
         host = host.substr(0, colon);
+
+    // K1-series: Creality web UI on port 80. K2-platform: Mainsail/Fluidd on 4408.
+    const std::string model = config->opt_string("printer_model");
+    if (boost::algorithm::icontains(model, "K1"))
+        return "http://" + host + "/";
 
     return "http://" + host + ":4408/";
 }
