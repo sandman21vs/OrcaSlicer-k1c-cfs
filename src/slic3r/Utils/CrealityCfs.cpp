@@ -364,12 +364,23 @@ bool CrealityCfsK1Provider::fetch(std::vector<CfsTray>& trays, int& box_count)
             if (box_num < 1)
                 continue;
 
+            // Remaining percentage lives in the per-box T<n>.remain_len array.
+            int               remain = -1;
+            const std::string tkey   = "T" + std::to_string(box_num);
+            if (box.contains(tkey) && box[tkey].contains("remain_len") && box[tkey]["remain_len"].is_array()) {
+                const auto& rl = box[tkey]["remain_len"];
+                if (slot >= 0 && slot < (int) rl.size() && rl[slot].is_string()) {
+                    try { remain = std::stoi(rl[slot].get<std::string>()); } catch (...) {}
+                }
+            }
+
             CfsTray tray;
             tray.slot_index    = (box_num - 1) * 4 + slot;
             tray.has_filament  = true;
             tray.tray_type     = base_type;
             tray.tray_color    = color_hex;
             tray.tray_info_idx = info_idx;
+            tray.remain        = remain;
             trays.push_back(std::move(tray));
 
             max_box = std::max(max_box, box_num);
@@ -460,6 +471,7 @@ bool CrealityCfsK2Provider::fetch(std::vector<CfsTray>& trays, int& box_count)
             tray.tray_type     = base_type;
             tray.tray_color    = color_hex;
             tray.tray_info_idx = info_idx;
+            tray.remain        = mat.value("percent", -1);
             trays.push_back(std::move(tray));
         }
     }

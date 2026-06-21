@@ -57,6 +57,7 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id)
             a.tray_type     = t.tray_type;
             a.tray_color    = t.tray_color;
             a.tray_info_idx = t.tray_info_idx;
+            a.remain        = t.remain;
             trays.push_back(std::move(a));
         }
 

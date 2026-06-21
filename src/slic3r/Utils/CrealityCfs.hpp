@@ -18,6 +18,7 @@ struct CfsTray
     std::string tray_type;            // base type, e.g. "PLA"
     std::string tray_color;           // "RRGGBB" (6 hex digits, no '#')
     std::string tray_info_idx;        // resolved filament preset id ("" if unknown)
+    int         remain       = -1;    // remaining filament percentage (0..100; -1 = unknown)
 };
 
 // Reads CFS state from a Creality printer. Each Creality product line exposes the
