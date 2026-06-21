@@ -3402,6 +3402,7 @@ std::map<int, DynamicPrintConfig> Sidebar::build_filament_ams_list(MachineObject
         tray_config.set_key_value("filament_multi_colour", new ConfigOptionStrings{});
         tray_config.set_key_value("filament_colour_type", new ConfigOptionStrings{std::to_string(tray.ctype)});
         tray_config.set_key_value("filament_exist", new ConfigOptionBools{tray.is_exists});
+        tray_config.set_key_value("filament_remain", new ConfigOptionInts{tray.remain});
         tray_config.set_key_value("filament_slot_placeholder", new ConfigOptionBools{tray.is_slot_placeholder});
         std::optional<FilamentBaseInfo> info;
         if (wxGetApp().preset_bundle) {
@@ -3587,6 +3588,9 @@ void Sidebar::load_ams_list(MachineObject* obj)
                 wxString          label = wxString::Format("%d%c", box + 1, char('A' + slot));
                 const std::string type  = tc.opt_string("filament_type", 0u);
                 if (!type.empty()) label += " - " + from_u8(type);
+                const auto* ro     = tc.option<ConfigOptionInts>("filament_remain");
+                const int   remain = (ro && !ro->values.empty()) ? ro->values.front() : -1;
+                if (remain >= 0) label += wxString::Format(" - %d%%", remain);
                 p->m_cfs_slot_choice->Append(label);
                 p->m_cfs_slots.emplace_back(box + 1, slot); // feedInOrOut box numbering (CFS = 1)
             }
