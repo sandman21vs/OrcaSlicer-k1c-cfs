@@ -1,5 +1,6 @@
 #include "CrealityPrintAgent.hpp"
 #include "CrealityPrint.hpp"
+#include "Http.hpp"
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
@@ -8,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 
 namespace Slic3r {
@@ -24,6 +26,110 @@ bool has_visible_base_preset(const PresetCollection& filaments, const std::strin
             && p.filament_id == filament_id)
             return true;
     }
+    return false;
+}
+
+// CFS spool material code -> (vendor, product name, base type). Extracted from
+// Creality's on-printer material database
+// (/mnt/UDISK/creality/userdata/box/material_database.json; mirrored by the
+// community K2-RFID project, db/{k1,k2,hi}.json). The CFS `box` object and the
+// MIFARE tag report a filamentId whose last 5 digits are this catalogue id (the
+// leading digit is a printer-series prefix). Resolving it to brand + product name
+// lets match_filament_preset() pick the exact Orca preset ("Hyper PLA",
+// "CR-PLA Matte", ...) instead of only a generic-by-type fallback.
+struct CfsCatalogEntry { const char* vendor; const char* name; const char* type; };
+
+const std::map<std::string, CfsCatalogEntry>& cfs_catalog()
+{
+    static const std::map<std::string, CfsCatalogEntry> tbl = {
+        {"00001", {"Generic", "Generic PLA", "PLA"}},
+        {"00002", {"Generic", "Generic PLA-Silk", "PLA"}},
+        {"00003", {"Generic", "Generic PETG", "PETG"}},
+        {"00004", {"Generic", "Generic ABS", "ABS"}},
+        {"00005", {"Generic", "Generic TPU", "TPU"}},
+        {"00006", {"Generic", "Generic PLA-CF", "PLA-CF"}},
+        {"00007", {"Generic", "Generic ASA", "ASA"}},
+        {"00008", {"Generic", "Generic PA", "PA"}},
+        {"00009", {"Generic", "Generic PA-CF", "PA-CF"}},
+        {"00010", {"Generic", "Generic BVOH", "BVOH"}},
+        {"00011", {"Generic", "Generic PVA", "PVA"}},
+        {"00012", {"Generic", "Generic HIPS", "HIPS"}},
+        {"00013", {"Generic", "Generic PET-CF", "PET-CF"}},
+        {"00014", {"Generic", "Generic PETG-CF", "PETG-CF"}},
+        {"00015", {"Generic", "Generic PA6-CF", "PA6-CF"}},
+        {"00016", {"Generic", "Generic PAHT-CF", "PAHT-CF"}},
+        {"00017", {"Generic", "Generic PPS", "PPS"}},
+        {"00018", {"Generic", "Generic PPS-CF", "PPS-CF"}},
+        {"00019", {"Generic", "Generic PP", "PP"}},
+        {"00020", {"Generic", "Generic PET", "PET"}},
+        {"00021", {"Generic", "Generic PC", "PC"}},
+        {"00022", {"Generic", "Generic PA612-CF", "PA-CF"}},
+        {"00023", {"Generic", "Generic Support for PA", "PA"}},
+        {"00024", {"Generic", "Generic Support for PLA", "PLA"}},
+        {"00025", {"Generic", "Generic PA12-CF", "PA-CF"}},
+        {"00026", {"Generic", "Generic TPU 64D", "TPU"}},
+        {"00027", {"Generic", "Generic PETG-GF", "PETG-GF"}},
+        {"00031", {"Generic", "Generic PP-CF", "PP-CF"}},
+        {"00032", {"Generic", "Generic PCTG", "PCTG"}},
+        {"00033", {"Generic", "Generic ASA-CF", "ASA-CF"}},
+        {"00034", {"Generic", "Generic PA6-GF", "PA-GF"}},
+        {"00035", {"eSUN", "PLA-LW", "PLA"}},
+        {"01001", {"Creality", "Hyper PLA", "PLA"}},
+        {"01002", {"Creality", "Hyper L-W PLA", "PLA"}},
+        {"01004", {"Creality", "Hyper Stardust", "PLA"}},
+        {"01601", {"Creality", "Soleyin Ultra PLA", "PLA"}},
+        {"02001", {"Creality", "Hyper PLA-CF", "PLA-CF"}},
+        {"03001", {"Creality", "Hyper ABS", "ABS"}},
+        {"04001", {"Creality", "CR-PLA", "PLA"}},
+        {"05001", {"Creality", "CR-Silk", "PLA"}},
+        {"06001", {"Creality", "CR-PETG", "PETG"}},
+        {"06002", {"Creality", "Hyper PETG", "PETG"}},
+        {"06003", {"Creality", "Hyper PETG-CF", "PETG-CF"}},
+        {"07001", {"Creality", "CR-ABS", "ABS"}},
+        {"07002", {"Creality", "Hyper PC", "PC"}},
+        {"08001", {"Creality", "Ender-PLA", "PLA"}},
+        {"09001", {"Creality", "EN-PLA+", "PLA"}},
+        {"09002", {"Creality", "ENDER FAST PLA", "PLA"}},
+        {"10001", {"Creality", "HP-TPU", "TPU"}},
+        {"11001", {"Creality", "CR-Nylon", "PA"}},
+        {"12002", {"Creality", "Hyper PPA-CF", "PA-CF"}},
+        {"12003", {"Creality", "Hyper PAHT-CF", "PA-CF"}},
+        {"12004", {"Creality", "Hyper PA612-CF", "PA612-CF"}},
+        {"12005", {"Creality", "Hyper PA6-CF", "PA6-CF"}},
+        {"13001", {"Creality", "CR-PLA Carbon", "PLA-CF"}},
+        {"14001", {"Creality", "CR-PLA Matte", "PLA"}},
+        {"15001", {"Creality", "CR-PLA Fluo", "PLA"}},
+        {"16001", {"Creality", "CR-TPU", "TPU"}},
+        {"17001", {"Creality", "CR-Wood", "PLA"}},
+        {"18001", {"Creality", "HP Ultra PLA", "PLA"}},
+        {"19001", {"Creality", "HP-ASA", "ASA"}},
+        {"29001", {"Creality", "Hyper Marble", "PLA"}},
+        {"E1001", {"eSUN", "PLA+", "PLA"}},
+        {"P1001", {"Polymaker", "Panchroma PLA Satin", "PLA"}},
+        {"P1002", {"Polymaker", "PolySonic PLA Pro", "PLA"}},
+        {"P1003", {"Polymaker", "Panchroma PLA Matte", "PLA"}},
+    };
+    return tbl;
+}
+
+// Resolve a CFS filamentId (5- or 6-digit; last 5 digits are the catalogue id) to
+// vendor/name/type. Returns false when the code is not in the catalogue.
+bool cfs_lookup_material(const std::string& code, std::string& vendor, std::string& name, std::string& type)
+{
+    const auto& tbl = cfs_catalog();
+    auto try_key = [&](const std::string& k) {
+        auto it = tbl.find(k);
+        if (it == tbl.end())
+            return false;
+        vendor = it->second.vendor;
+        name   = it->second.name;
+        type   = it->second.type;
+        return true;
+    };
+    if (try_key(code))
+        return true;
+    if (code.size() > 5 && try_key(code.substr(code.size() - 5)))
+        return true;
     return false;
 }
 
@@ -233,8 +339,181 @@ bool CrealityPrintAgent::parse_cfs_response(const std::string&    response,
     return true;
 }
 
+// Parse the Klipper `box` object (K1-series CFS, e.g. K1C) fetched from Moonraker
+// at /printer/objects/query?box. Schema (verified 2026-06-20 against a K1C, CFS
+// firmware box version 1.1.3):
+//   "box": {
+//     "same_material": [
+//       ["103001","0000000",["T1A"],"ABS"],   // [type_code, "0RRGGBB", [slot labels], type]
+//       ["114001","00B359A",["T1B"],"PLA"], ... ],
+//     "T1": { "color_value": ["0RRGGBB",...4], "material_type": [...4],
+//             "remain_len": [...4], "state": "connect", ... },
+//     "T2".."T4": { ... "state": "None" when no box attached }
+//   }
+// Slot labels encode position: "T<box><slot>" with box 1..4 and slot A..D.
+// Unlike the K2's port-9999 boxsInfo, the K1C exposes the CFS purely through
+// Moonraker, so we reuse the base agent's HTTP plumbing.
+bool CrealityPrintAgent::fetch_cfs_box_object(std::vector<AmsTrayData>& trays, int& max_slot_index)
+{
+    trays.clear();
+    max_slot_index = 0;
+
+    // Derive the bare host. On the K1C the device IP's port 80 serves Creality's
+    // own control API (not Moonraker), so we must target Moonraker's port. We try
+    // the canonical direct port (7125) first, then the nginx-proxied web ports
+    // (Creality K-series ship Mainsail/Fluidd on 4408/4409), then whatever
+    // base_url the agent recorded. Verified 2026-06-20: K1C answers on :7125 and
+    // :4409 but 404s on :80.
+    std::string host = device_info.dev_ip;
+    if (host.empty() && !device_info.base_url.empty()) {
+        host = device_info.base_url;
+        if (auto p = host.find("://"); p != std::string::npos)
+            host = host.substr(p + 3);
+        if (auto s = host.find('/'); s != std::string::npos)
+            host = host.substr(0, s);
+        if (auto c = host.rfind(':'); c != std::string::npos)
+            host = host.substr(0, c);
+    }
+    if (host.empty())
+        return false;
+
+    std::vector<std::string> candidates = {
+        "http://" + host + ":7125",
+        "http://" + host + ":4409",
+        "http://" + host + ":4408",
+    };
+    if (!device_info.base_url.empty())
+        candidates.push_back(device_info.base_url);
+
+    auto query_box = [&](const std::string& base) -> std::string {
+        std::string body;
+        bool        ok   = false;
+        auto        http = Http::get(join_url(base, "/printer/objects/query?box"));
+        if (!device_info.api_key.empty())
+            http.header("X-Api-Key", device_info.api_key);
+        http.timeout_connect(3)
+            .timeout_max(8)
+            .on_complete([&](std::string b, unsigned status) { if (status == 200) { body = std::move(b); ok = true; } })
+            .on_error([&](std::string, std::string, unsigned) {})
+            .perform_sync();
+        return ok ? body : std::string();
+    };
+
+    nlohmann::json json;
+    bool           found = false;
+    for (const auto& base : candidates) {
+        std::string body = query_box(base);
+        if (body.empty())
+            continue;
+        json = nlohmann::json::parse(body, nullptr, false, true);
+        if (json.is_discarded())
+            continue;
+        if (json.contains("result") && json["result"].contains("status")
+            && json["result"]["status"].contains("box")) {
+            BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: found Moonraker `box` object at " << base;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        return false;
+
+    const auto& box = json["result"]["status"]["box"];
+    if (!box.contains("same_material") || !box["same_material"].is_array())
+        return false;
+
+    auto* bundle = GUI::wxGetApp().preset_bundle;
+
+    for (const auto& entry : box["same_material"]) {
+        if (!entry.is_array() || entry.size() < 4)
+            continue;
+        const std::string code      = entry[0].is_string() ? entry[0].get<std::string>() : std::string();
+        const std::string color_raw = entry[1].is_string() ? entry[1].get<std::string>() : std::string();
+        const auto&       labels    = entry[2];
+        const std::string type_str  = entry[3].is_string() ? entry[3].get<std::string>() : std::string();
+        if (type_str.empty() || !labels.is_array())
+            continue;
+
+        // Resolve the filamentId code to vendor + product name via the catalogue,
+        // so we can match the exact Orca preset. Fall back to the box's own type
+        // string when the code is unknown.
+        std::string cat_vendor, cat_name, cat_type;
+        const bool  resolved  = cfs_lookup_material(code, cat_vendor, cat_name, cat_type);
+        const std::string base_type =
+            normalize_filament_type(resolved && !cat_type.empty() ? cat_type : type_str);
+
+        // Color arrives as "0RRGGBB" (7 hex chars, leading 0). Keep only hex
+        // digits and take the last 6 so build_ams_payload's normalizer accepts it.
+        std::string color_hex;
+        for (char c : color_raw)
+            if (std::isxdigit(static_cast<unsigned char>(c)))
+                color_hex.push_back(c);
+        if (color_hex.size() > 6)
+            color_hex = color_hex.substr(color_hex.size() - 6);
+
+        // match_filament_preset scores by brand/vendor substrings and falls back
+        // to filament_id_by_type(base_type) when both are empty (unknown code).
+        std::string info_idx = bundle
+            ? match_filament_preset(bundle->filaments, cat_vendor, cat_name, base_type)
+            : map_filament_type_to_generic_id(base_type);
+
+        for (const auto& lbl_json : labels) {
+            if (!lbl_json.is_string())
+                continue;
+            const std::string lbl = lbl_json.get<std::string>(); // e.g. "T1A"
+            if (lbl.size() < 3 || std::toupper(static_cast<unsigned char>(lbl[0])) != 'T')
+                continue;
+
+            const char slot_ch = static_cast<char>(std::toupper(static_cast<unsigned char>(lbl.back())));
+            if (slot_ch < 'A' || slot_ch > 'Z')
+                continue;
+            const int slot = slot_ch - 'A';
+
+            int box_num = 0;
+            try {
+                box_num = std::stoi(lbl.substr(1, lbl.size() - 2));
+            } catch (...) {
+                continue;
+            }
+            if (box_num < 1)
+                continue;
+
+            const int slot_index = (box_num - 1) * 4 + slot;
+
+            AmsTrayData tray;
+            tray.slot_index    = slot_index;
+            tray.has_filament  = true;
+            tray.tray_type     = base_type;
+            tray.tray_color    = color_hex;
+            tray.tray_info_idx = info_idx;
+            trays.push_back(std::move(tray));
+
+            max_slot_index = std::max(max_slot_index, slot_index);
+        }
+    }
+
+    return !trays.empty();
+}
+
 bool CrealityPrintAgent::fetch_filament_info(std::string dev_id)
 {
+    // 1) K1-series CFS (e.g. K1C) is exposed as the Klipper `box` object via
+    //    Moonraker — no proprietary port-9999 WebSocket. Try this first.
+    {
+        std::vector<AmsTrayData> trays;
+        int                      max_slot_index = 0;
+        if (fetch_cfs_box_object(trays, max_slot_index)) {
+            const int ams_count = (max_slot_index + 4) / 4;
+            BOOST_LOG_TRIVIAL(info)
+                << "CrealityPrintAgent: CFS (Klipper box) with " << trays.size()
+                << " loaded slot(s) across " << ams_count << " box(es)";
+            build_ams_payload(ams_count, max_slot_index, trays);
+            return true;
+        }
+    }
+
+    // 2) K2-platform CFS is exposed via the proprietary port-9999 WebSocket
+    //    boxsInfo. Requires the device IP.
     if (device_info.dev_ip.empty()) {
         BOOST_LOG_TRIVIAL(warning)
             << "CrealityPrintAgent::fetch_filament_info: no device IP, falling back to base agent";
@@ -253,16 +532,12 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id)
 
     CrealityPrint host(&cfg);
 
-    // Defer to base if this isn't a K-series board with CFS firmware support.
-    if (!host.supports_multi_color_print()) {
-        BOOST_LOG_TRIVIAL(info)
-            << "CrealityPrintAgent: " << host.model_name()
-            << " is not CFS-capable, deferring to base Moonraker agent";
-        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
-    }
-
+    // Dynamic CFS detection: don't gate on a hard-coded model allowlist (which
+    // excluded the K1C). Always attempt the CFS query; the parse + box_count
+    // checks below decide whether this printer actually has a CFS. Non-CFS
+    // boards (or an unreachable query) fall back to the base Moonraker agent.
     BOOST_LOG_TRIVIAL(info)
-        << "CrealityPrintAgent: querying CFS slots on " << host.model_name();
+        << "CrealityPrintAgent: probing CFS slots on " << host.model_name();
 
     const std::string response = host.query_boxes_info();
 
