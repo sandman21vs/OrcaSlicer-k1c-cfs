@@ -1,0 +1,15 @@
+{
+    "type": "machine",
+    "name": "Creality K1C CFS 0.4 nozzle",
+    "from": "system",
+    "instantiation": "true",
+    "inherits": "Creality K1C 0.4 nozzle",
+    "printer_variant": "0.4",
+    "printable_area": [
+        "0x0",
+        "220x0",
+        "220x215",
+        "0x215"
+    ],
+    "machine_start_gcode": "M140 S0\nM104 S0 \nSTART_PRINT EXTRUDER_TEMP=[nozzle_temperature_initial_layer] BED_TEMP=[bed_temperature_initial_layer_single]\nT{current_extruder}\nRESPOND TYPE=command MSG=\"Loading Filament from CFS Slot \"{current_extruder+1}\nM204 S2000\nG1 Z3 F600\nM83\nG1 Y150 F12000\nG1 X0 F12000\nG1 Z0.2 F600\nG1 X0 Y150 F6000\nG1 X0 Y0 E15 F6000\nG1 X150 Y0 E15 F6000\nG92 E0\nG1 Z1 F600"
+}
