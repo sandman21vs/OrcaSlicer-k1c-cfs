@@ -263,23 +263,30 @@ bool CrealityCfsK1Provider::fetch(std::vector<CfsTray>& trays, int& box_count)
     // first, then the nginx-proxied web ports (4409/4408), then the recorded
     // base_url. Verified 2026-06-20: K1C answers on :7125 and :4409, 404s on :80.
     std::string host = m_dev_ip;
-    if (host.empty() && !m_base_url.empty()) {
+    if (host.empty() && !m_base_url.empty())
         host = m_base_url;
-        if (auto p = host.find("://"); p != std::string::npos)
-            host = host.substr(p + 3);
-        if (auto s = host.find('/'); s != std::string::npos)
-            host = host.substr(0, s);
-        if (auto c = host.rfind(':'); c != std::string::npos)
-            host = host.substr(0, c);
+    // Normalize to a bare host and remember any user-configured port. The print_host
+    // may carry an upload port (80 / 4408 / 4409 / 4410 / ...); the Moonraker box may
+    // answer on that port or on a known default, so we try the configured port first
+    // and then fall back to the usual Moonraker ports. (Leaving the port on the host
+    // would build "host:4409:7125", which is invalid.)
+    if (auto p = host.find("://"); p != std::string::npos)
+        host = host.substr(p + 3);
+    if (auto s = host.find('/'); s != std::string::npos)
+        host = host.substr(0, s);
+    std::string configured_port;
+    if (auto c = host.rfind(':'); c != std::string::npos) {
+        configured_port = host.substr(c + 1);
+        host            = host.substr(0, c);
     }
     if (host.empty())
         return false;
 
-    std::vector<std::string> candidates = {
-        "http://" + host + ":7125",
-        "http://" + host + ":4409",
-        "http://" + host + ":4408",
-    };
+    std::vector<std::string> candidates;
+    if (!configured_port.empty())
+        candidates.push_back("http://" + host + ":" + configured_port);
+    for (const char* port : {"7125", "4409", "4408", "4410"})
+        candidates.push_back("http://" + host + ":" + port);
     if (!m_base_url.empty())
         candidates.push_back(m_base_url);
 
