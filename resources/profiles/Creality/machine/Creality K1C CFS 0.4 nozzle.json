@@ -190,7 +190,7 @@
     "printer_extruder_variant": [
         "Direct Drive Standard"
     ],
-    "printer_model": "Creality K1C",
+    "printer_model": "Creality K1C CFS",
     "printer_structure": "undefine",
     "printer_technology": "FFF",
     "printer_variant": "0.4",
