@@ -1,5 +1,6 @@
 #include "CrealityPrintAgent.hpp"
 #include "CrealityPrint.hpp"
+#include "Http.hpp"
 #include "MoonrakerPrinterAgent.hpp"
 #include "IPrinterAgent.hpp"
 #include "libslic3r/PresetBundle.hpp"
@@ -293,62 +294,147 @@ bool CrealityPrintAgent::parse_cfs_response(const std::string&    response,
     return true;
 }
 
-bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)
+// Schema, verified 2026-06-20 against a K1C running CFS firmware box version 1.1.3:
+//   { "result": { "status": { "box": {
+//       "same_material": [ ["103001", "0000000", ["T1A"], "ABS"], ... ],
+//       "T1": { "remain_len": ["85", "60", ...] } } } } }
+// One same_material entry is one spool: [filament id, "0RRGGBB", slot labels, type]. A spool
+// loaded into several slots lists them all, so the entry is the material and the labels are
+// the positions. A label is "T<box><slot>" with the box 1-based and the slot a letter.
+bool CrealityPrintAgent::parse_box_response(const std::string&    response,
+                                            std::vector<CFSSlot>& slots,
+                                            int&                  box_count,
+                                            std::string&          error)
 {
-    if (device_info.dev_ip.empty()) {
-        BOOST_LOG_TRIVIAL(warning)
-            << "CrealityPrintAgent::fetch_filament_info: no device IP, falling back to base agent";
-        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    slots.clear();
+    box_count = 0;
+
+    if (response.empty()) {
+        error = "empty response";
+        return false;
     }
 
-    // Build a CrealityPrint helper so we can use its model detection + WS helpers
-    // (added in upstream PR #13291).
-    DynamicPrintConfig cfg;
-    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + device_info.dev_ip));
-    cfg.set_key_value("print_host_webui",            new ConfigOptionString(""));
-    cfg.set_key_value("printhost_cafile",            new ConfigOptionString(""));
-    cfg.set_key_value("printhost_port",              new ConfigOptionString(""));
-    cfg.set_key_value("printhost_apikey",            new ConfigOptionString(device_info.api_key));
-    cfg.set_key_value("printhost_ssl_ignore_revoke", new ConfigOptionBool(false));
-
-    CrealityPrint host(&cfg);
-
-    // Defer to base if this isn't a K-series board with CFS firmware support.
-    if (!host.supports_multi_color_print()) {
-        BOOST_LOG_TRIVIAL(info)
-            << "CrealityPrintAgent: " << host.model_name()
-            << " is not CFS-capable, deferring to base Moonraker agent";
-        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    json resp;
+    try {
+        resp = json::parse(response);
+    } catch (const std::exception& e) {
+        error = std::string("JSON parse error: ") + e.what();
+        return false;
     }
 
-    BOOST_LOG_TRIVIAL(info)
-        << "CrealityPrintAgent: querying CFS slots on " << host.model_name();
-
-    const std::string response = host.query_boxes_info();
-
-    std::vector<CFSSlot> slots;
-    int                  box_count = 0;
-    std::string          parse_err;
-    if (!parse_cfs_response(response, slots, box_count, parse_err)) {
-        BOOST_LOG_TRIVIAL(warning)
-            << "CrealityPrintAgent: CFS query failed (" << parse_err << "), "
-            << "falling back to base agent";
-        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    if (!resp.contains("result") || !resp["result"].contains("status")
+        || !resp["result"]["status"].contains("box")) {
+        error = "invalid schema (missing result.status.box)";
+        return false;
     }
 
-    if (box_count == 0) {
-        // No active CFS boxes attached — printer is in direct-spool mode. Let the
-        // base agent take over so the user still gets whatever filament info
-        // Moonraker exposes.
-        BOOST_LOG_TRIVIAL(info)
-            << "CrealityPrintAgent: no active CFS boxes, deferring to base agent";
-        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    const auto& box = resp["result"]["status"]["box"];
+    if (!box.contains("same_material") || !box["same_material"].is_array()) {
+        error = "invalid schema (missing box.same_material)";
+        return false;
     }
 
-    BOOST_LOG_TRIVIAL(info)
-        << "CrealityPrintAgent: " << box_count << " CFS box(es), "
-        << slots.size() << " loaded slot(s)";
+    int max_box = 0;
+    for (const auto& entry : box["same_material"]) {
+        if (!entry.is_array() || entry.size() < 4)
+            continue;
+        if (!entry[1].is_string() || !entry[2].is_array() || !entry[3].is_string())
+            continue;
 
+        const std::string filament_type = entry[3].get<std::string>();
+        if (filament_type.empty())
+            continue;
+
+        // The box reports a colour as "0RRGGBB". Keep the hex digits and take the last
+        // six, which drops that leading zero and also accepts a plain "RRGGBB".
+        std::string hex;
+        for (char c : entry[1].get<std::string>())
+            if (std::isxdigit(static_cast<unsigned char>(c)))
+                hex.push_back(c);
+        if (hex.size() > 6)
+            hex = hex.substr(hex.size() - 6);
+
+        for (const auto& label_json : entry[2]) {
+            if (!label_json.is_string())
+                continue;
+            const std::string label = label_json.get<std::string>();
+            if (label.size() < 3 || std::toupper(static_cast<unsigned char>(label.front())) != 'T')
+                continue;
+
+            const char slot_ch = static_cast<char>(std::toupper(static_cast<unsigned char>(label.back())));
+            if (slot_ch < 'A' || slot_ch > 'Z')
+                continue;
+
+            int box_num = 0;
+            try {
+                box_num = std::stoi(label.substr(1, label.size() - 2));
+            } catch (const std::exception&) {
+                continue;
+            }
+            if (box_num < 1)
+                continue;
+
+            CFSSlot s;
+            s.box_id        = box_num - 1;          // the labels count boxes from 1, CFSSlot from 0
+            s.slot_id       = slot_ch - 'A';
+            s.filament_type = filament_type;
+            s.color_hex     = hex.size() == 6 ? "#" + hex : "#FFFFFF";
+
+            // Each box reports what is left per slot as a string under its own T<n> key.
+            const std::string box_key = "T" + std::to_string(box_num);
+            if (box.contains(box_key) && box[box_key].contains("remain_len")
+                && box[box_key]["remain_len"].is_array()) {
+                const auto& remain_len = box[box_key]["remain_len"];
+                if (s.slot_id < static_cast<int>(remain_len.size()) && remain_len[s.slot_id].is_string()) {
+                    try {
+                        s.remain = std::stoi(remain_len[s.slot_id].get<std::string>());
+                    } catch (const std::exception&) {
+                        // Leave the level unknown rather than claiming an empty spool.
+                    }
+                }
+            }
+
+            // The box names no vendor or product, only the type, so match_filament_preset()
+            // scores nothing and falls back to the generic preset for that type. Resolving
+            // the entry's filament id to a product is a follow-up.
+            slots.push_back(std::move(s));
+            max_box = std::max(max_box, box_num);
+        }
+    }
+
+    box_count = max_box;
+    return true;
+}
+
+std::string CrealityPrintAgent::query_box_object() const
+{
+    const std::string url = join_url(device_info.base_url, "/printer/objects/query?box");
+
+    std::string body;
+    bool        ok = false;
+    auto        http = Http::get(url);
+    if (!device_info.api_key.empty())
+        http.header("X-Api-Key", device_info.api_key);
+    http.timeout_connect(5)
+        .timeout_max(10)
+        .on_complete([&](std::string response, unsigned status) {
+            if (status == 200) {
+                body = std::move(response);
+                ok   = true;
+            }
+        })
+        .on_error([&](std::string, std::string err, unsigned status) {
+            BOOST_LOG_TRIVIAL(debug)
+                << "CrealityPrintAgent: `box` query on " << url << " failed: " << err
+                << " (HTTP " << status << ")";
+        })
+        .perform_sync();
+
+    return ok ? body : std::string();
+}
+
+void CrealityPrintAgent::publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count)
+{
     // Index loaded slots by (box, slot) for O(1) lookup as we walk the full
     // box_count * 4 grid, emitting an AmsTrayData entry for each physical slot.
     std::map<std::pair<int, int>, const CFSSlot*> by_position;
@@ -389,6 +475,62 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
     }
 
     build_ams_payload(box_count, max_slots - 1, trays);
+}
+
+bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)
+{
+    if (device_info.dev_ip.empty()) {
+        BOOST_LOG_TRIVIAL(warning)
+            << "CrealityPrintAgent::fetch_filament_info: no device IP, falling back to base agent";
+        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    }
+
+    // Build a CrealityPrint helper so we can use its model detection + WS helpers
+    // (added in upstream PR #13291).
+    DynamicPrintConfig cfg;
+    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + device_info.dev_ip));
+    cfg.set_key_value("print_host_webui",            new ConfigOptionString(""));
+    cfg.set_key_value("printhost_cafile",            new ConfigOptionString(""));
+    cfg.set_key_value("printhost_port",              new ConfigOptionString(""));
+    cfg.set_key_value("printhost_apikey",            new ConfigOptionString(device_info.api_key));
+    cfg.set_key_value("printhost_ssl_ignore_revoke", new ConfigOptionBool(false));
+
+    CrealityPrint host(&cfg);
+
+    std::vector<CFSSlot> slots;
+    int                  box_count = 0;
+    std::string          parse_err;
+
+    // The K2 platform publishes its CFS as the proprietary boxsInfo document on the
+    // control WebSocket; only a model that identifies as CFS-capable is asked, since a
+    // board without that socket would cost the whole connect and reply deadline.
+    if (host.supports_multi_color_print()) {
+        BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: querying CFS slots on " << host.model_name();
+        if (!parse_cfs_response(host.query_boxes_info(), slots, box_count, parse_err))
+            BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: boxsInfo gave no CFS (" << parse_err << ")";
+    }
+
+    // A K1-family board publishes its CFS as the Klipper `box` object over Moonraker
+    // and does not answer boxsInfo at all. The object is asked for regardless of the
+    // model check above: on a rooted board the port-80 /info that identifies the model
+    // may be served by another web UI, and a `box` object is itself proof of a CFS.
+    if (box_count == 0 && !parse_box_response(query_box_object(), slots, box_count, parse_err))
+        BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: no Moonraker `box` object (" << parse_err << ")";
+
+    if (box_count == 0) {
+        // Neither transport found a box: the printer is in direct-spool mode, or has no
+        // CFS at all. Let the base agent take over so the user still gets whatever
+        // filament info Moonraker exposes.
+        BOOST_LOG_TRIVIAL(info)
+            << "CrealityPrintAgent: no active CFS boxes, deferring to base agent";
+        return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
+    }
+
+    BOOST_LOG_TRIVIAL(info)
+        << "CrealityPrintAgent: " << box_count << " CFS box(es), "
+        << slots.size() << " loaded slot(s)";
+
+    publish_cfs_slots(slots, box_count);
     return true;
 }
 

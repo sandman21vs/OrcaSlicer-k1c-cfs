@@ -165,3 +165,94 @@ TEST_CASE("A CFS slot keeps an unreported filament level unknown", "[CFS][Creali
     CHECK(slots[0].remain == 85);
     CHECK(slots[1].remain == -1);
 }
+
+
+namespace {
+
+// A Moonraker /printer/objects/query?box reply, as a K1-family board with a CFS answers it.
+std::string box_reply(const std::string& box_body)
+{
+    return R"({"result":{"eventtime":1.0,"status":{"box":)" + box_body + "}}}";
+}
+
+} // namespace
+
+TEST_CASE("A K1 box slot label gives the box and the slot of the spool", "[CFS][Creality]")
+{
+    // "T<box><slot>": boxes count from 1 on the printer and from 0 in CFSSlot; slots are letters.
+    const std::string response = box_reply(R"({"same_material":[
+        ["114001","00B359A",["T1A"],"PLA"],
+        ["103001","0000000",["T2C"],"ABS"]
+    ]})");
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_box_response(response, slots, box_count, error));
+    REQUIRE(slots.size() == 2);
+
+    CHECK(slots[0].box_id == 0);
+    CHECK(slots[0].slot_id == 0);
+    CHECK(slots[0].filament_type == "PLA");
+    CHECK(slots[1].box_id == 1);
+    CHECK(slots[1].slot_id == 2);
+    CHECK(slots[1].filament_type == "ABS");
+    CHECK(box_count == 2);
+}
+
+TEST_CASE("A spool the K1 box lists under several slots fills each of them", "[CFS][Creality]")
+{
+    const std::string response = box_reply(R"({"same_material":[["114001","00B359A",["T1A","T1D"],"PLA"]]})");
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_box_response(response, slots, box_count, error));
+    REQUIRE(slots.size() == 2);
+    CHECK(slots[0].slot_id == 0);
+    CHECK(slots[1].slot_id == 3);
+    CHECK(box_count == 1);
+}
+
+TEST_CASE("A K1 box colour loses the leading zero the printer pads it with", "[CFS][Creality]")
+{
+    const std::string response = box_reply(R"({"same_material":[["114001","00B359A",["T1A"],"PLA"]]})");
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_box_response(response, slots, box_count, error));
+    REQUIRE(slots.size() == 1);
+    CHECK(slots[0].color_hex == "#0B359A");
+}
+
+TEST_CASE("A K1 box reports each slot's filament level and keeps an unreported one unknown", "[CFS][Creality]")
+{
+    // remain_len is per box, indexed by slot, with the values as strings. Box 1 reports
+    // slot A; box 2 reports nothing.
+    const std::string response = box_reply(R"({"same_material":[
+        ["114001","00B359A",["T1A"],"PLA"],
+        ["103001","0000000",["T2A"],"ABS"]
+    ],"T1":{"remain_len":["72","0","0","0"]}})");
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_box_response(response, slots, box_count, error));
+    REQUIRE(slots.size() == 2);
+    CHECK(slots[0].remain == 72);
+    CHECK(slots[1].remain == -1);
+}
+
+TEST_CASE("A Moonraker printer without a box object reports no CFS", "[CFS][Creality]")
+{
+    // Moonraker answers a query for an object Klipper does not have with an empty status.
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    CHECK_FALSE(CrealityPrintAgent::parse_box_response(R"({"result":{"eventtime":1.0,"status":{}}})",
+                                                       slots, box_count, error));
+    CHECK(slots.empty());
+    CHECK(box_count == 0);
+    CHECK_FALSE(error.empty());
+}

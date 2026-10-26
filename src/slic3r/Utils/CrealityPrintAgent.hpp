@@ -62,6 +62,21 @@ public:
                                              const std::string&      vendor,
                                              const std::string&      brand_name,
                                              const std::string&      base_type);
+
+    // Parse the Klipper `box` object a K1-family board publishes over Moonraker into the
+    // same slot list parse_cfs_response() produces from the K2 platform's boxsInfo.
+    static bool parse_box_response(const std::string&    response,
+                                   std::vector<CFSSlot>& slots,
+                                   int&                  box_count,
+                                   std::string&          error);
+
+private:
+    // Read the Klipper `box` object over Moonraker. Empty when the printer has no such
+    // object, which is every board whose CFS only answers the boxsInfo WebSocket.
+    std::string query_box_object() const;
+
+    // Turn a parsed slot list into the AMS payload the filament views read.
+    void publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count);
 };
 
 } // namespace Slic3r
