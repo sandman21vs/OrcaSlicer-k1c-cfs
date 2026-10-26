@@ -302,6 +302,9 @@ static bool is_k1_family(const std::string& model)
         "K1 SE",
         "K1C",
         "K1_CFS-C",
+        "K1C_CFS-C",
+        "K1 SE_CFS-C",
+        "K1 Max_CFS-C",
     };
     return k1_models.count(model) > 0;
 }
@@ -328,6 +331,9 @@ static const std::map<std::string, std::string>& cfs_capable_models()
         {"K1 SE", "K1 SE"},
         {"K1C", "K1C"},
         {"K1_CFS-C", "K1_CFS-C"},
+        {"K1C_CFS-C", "K1C_CFS-C"},
+        {"K1 SE_CFS-C", "K1 SE_CFS-C"},
+        {"K1 Max_CFS-C", "K1 Max_CFS-C"},
     };
     return models;
 }

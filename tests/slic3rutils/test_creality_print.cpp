@@ -246,6 +246,19 @@ bool upload_and_print(const CrealityPrint& host, wxString& error, const std::map
 
 } // namespace
 
+TEST_CASE("Every model a shipped CFS-C printer profile names is CFS-capable", "[CrealityPrint]")
+{
+    // resources/profiles/Creality ships a machine_model per CFS-C kit, and each of those
+    // printers reports its own model string from /info. A string missing here leaves the
+    // profile wired to the Creality host but never taking the multi-colour branch, so the
+    // CFS is never asked for its slots and the job starts with no filament loaded.
+    const std::string model = GENERATE(as<std::string>{}, "K1_CFS-C", "K1C_CFS-C", "K1 SE_CFS-C", "K1 Max_CFS-C");
+    CAPTURE(model);
+
+    CHECK(CrealityPrint::model_supports_multi_color(model));
+    CHECK_FALSE(CrealityPrint::model_display_name(model).empty());
+}
+
 TEST_CASE("Querying the CFS slots gives a silent printer no more than its deadlines", "[CrealityPrint]")
 {
     const Behavior behavior = GENERATE(Behavior::SilentBeforeHandshake, Behavior::Silent);
@@ -306,6 +319,9 @@ TEST_CASE("Starting a print sends each command with the G-code path in a text fr
         {"F001", {}, {"opGcodeFile"}, "printprt:/mnt/UDISK/printer_data/gcodes/test.gcode"},
         {"K1C", cfs_mapping, {"colorMatch", "multiColorPrint"}, "/usr/data/printer_data/gcodes/test.gcode"},
         {"K1C", {}, {"opGcodeFile"}, "printprt:/usr/data/printer_data/gcodes/test.gcode"},
+        {"K1C_CFS-C", cfs_mapping, {"colorMatch", "multiColorPrint"}, "/usr/data/printer_data/gcodes/test.gcode"},
+        {"K1C_CFS-C", {}, {"opGcodeFile"}, "printprt:/usr/data/printer_data/gcodes/test.gcode"},
+        {"K1 Max_CFS-C", cfs_mapping, {"colorMatch", "multiColorPrint"}, "/usr/data/printer_data/gcodes/test.gcode"},
     }));
     CAPTURE(model, extended_info.size());
 
