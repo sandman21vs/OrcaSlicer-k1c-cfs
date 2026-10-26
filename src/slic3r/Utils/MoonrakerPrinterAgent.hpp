@@ -105,6 +105,7 @@ protected:
         std::string tray_info_idx;       // Filament ID (optional)
         int         bed_temp = 0;        // Optional
         int         nozzle_temp = 0;     // Optional
+        int         remain = -1;         // Filament left, 0..100; -1 when the printer does not report it
     };
 
     // Build ams JSON and call parser

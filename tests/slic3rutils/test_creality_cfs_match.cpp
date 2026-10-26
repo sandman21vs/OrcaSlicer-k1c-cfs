@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <string>
 #include <vector>
 
 #include "libslic3r/Preset.hpp"
@@ -140,4 +141,27 @@ TEST_CASE("A third party spool matches its preset inside the printer vendor's bu
     // ... and a Creality spool still prefers Creality's own generic over the eSUN preset, which
     // carries Creality's profile too but adds a brand word the spool never claimed.
     CHECK(match(with_third_party, "Creality", "", "PLA") == "PLA-GENERIC");
+}
+
+
+// Orca: the CFS reports what is left on each spool as "percent". DevAmsTray::remain defaults to
+// 0, so a slot whose box never reports a level has to arrive as -1 ("unknown") rather than 0,
+// which the AMS views would draw as an empty spool.
+TEST_CASE("A CFS slot keeps an unreported filament level unknown", "[CFS][Creality]")
+{
+    const std::string response = R"({"boxsInfo":{"materialBoxs":[{"id":1,"state":1,"type":0,"materials":[
+        {"id":0,"state":1,"vendor":"Creality","type":"PLA","name":"Hyper PLA","color":"#0FF0000","percent":85},
+        {"id":1,"state":1,"vendor":"Creality","type":"PETG","name":"CR-PETG","color":"#000FF00"}
+    ]}]}})";
+
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    int                                      box_count = 0;
+    std::string                              error;
+    REQUIRE(CrealityPrintAgent::parse_cfs_response(response, slots, box_count, error));
+    CHECK(error.empty());
+    CHECK(box_count == 1);
+    REQUIRE(slots.size() == 2);
+
+    CHECK(slots[0].remain == 85);
+    CHECK(slots[1].remain == -1);
 }

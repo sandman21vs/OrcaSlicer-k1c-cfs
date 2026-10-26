@@ -275,6 +275,11 @@ bool CrealityPrintAgent::parse_cfs_response(const std::string&    response,
             s.filament_type = s_type;
             s.color_hex     = mat.value("color",  "#FFFFFF");
 
+            // Percentage left on the spool, as the CFS measures it. Boxes that do not
+            // report it leave the slot at -1 so the UI keeps showing an unknown level
+            // instead of an empty spool.
+            s.remain        = mat.value("percent", -1);
+
             // Creality reports colour as "#0RRGGBB" (8 chars with a leading zero
             // after '#'). Normalise to standard "#RRGGBB".
             if (s.color_hex.size() == 8 && s.color_hex[0] == '#')
@@ -372,6 +377,7 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
             tray.has_filament = true;
             tray.tray_type    = normalize_filament_type(s.filament_type);
             tray.tray_color   = s.color_hex;
+            tray.remain       = s.remain;
 
             if (bundle) {
                 tray.tray_info_idx = match_filament_preset(

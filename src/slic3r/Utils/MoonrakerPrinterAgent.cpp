@@ -541,6 +541,12 @@ void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index,
                 if (tray->nozzle_temp > 0) {
                     tray_json["nozzle_temp_max"] = std::to_string(tray->nozzle_temp);
                 }
+
+                // Leaving the key out makes the parser store -1, which the AMS views
+                // read as "level unknown". Writing 0 would claim an empty spool.
+                if (tray->remain >= 0) {
+                    tray_json["remain"] = tray->remain;
+                }
             } else {
                 tray_json["tray_info_idx"] = "";
                 tray_json["tray_type"] = "";
@@ -563,6 +569,11 @@ void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index,
     ams_json["ams"] = ams_array;
     ams_json["ams_exist_bits"] = ams_exist_ss.str();
     ams_json["tray_exist_bits"] = tray_exist_ss.str();
+
+    // Gates every remaining-filament display in the AMS views. Only claim the printer
+    // measures a level when at least one slot actually reported one.
+    ams_json["calibrate_remain_flag"] = std::any_of(trays.begin(), trays.end(),
+                                                    [](const AmsTrayData& t) { return t.remain >= 0; });
 
     // Wrap in the expected structure for ParseV1_0
     nlohmann::json print_json = nlohmann::json::object();
