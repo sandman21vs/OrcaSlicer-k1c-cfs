@@ -65,6 +65,58 @@ TEST_CASE("AMS tray placeholder state follows the latest status", "[DevFilaSyste
     CHECK_FALSE(tray->is_slot_placeholder);
 }
 
+TEST_CASE("A filament level counts for any spool only on a printer that measures it", "[DevFilaSystem]")
+{
+    // A Bambu printer only knows the level of a spool whose RFID tag carries its weight; a printer
+    // on another agent reports what it measured, whatever the spool.
+    const std::string no_tag  = "0000000000000000";
+    const std::string bbl_tag = "5A2C1E8F00000000";
+    MachineObject     obj(nullptr, nullptr, "test", "test_dev", "127.0.0.1");
+
+    obj.printer_agent_id = "bbl";
+    CHECK_FALSE(DevFilaSystem::IsRemainReliable(&obj, no_tag));
+    CHECK(DevFilaSystem::IsRemainReliable(&obj, bbl_tag));
+
+    obj.printer_agent_id = "crealityprint";
+    CHECK(DevFilaSystem::IsRemainReliable(&obj, no_tag));
+
+    // A machine no agent has claimed yet keeps the Bambu rule.
+    obj.printer_agent_id.clear();
+    CHECK_FALSE(DevFilaSystem::IsRemainReliable(&obj, no_tag));
+}
+
+TEST_CASE("A unit sent as an AMS keeps each slot's reported level", "[DevFilaSystem]")
+{
+    // The Creality agent sends its CFS as info "0001" so the device page draws it as an AMS,
+    // whose view shows the level; the short form has to decode to the same model.
+    MachineObject obj(nullptr, nullptr, "test", "test_dev", "127.0.0.1");
+
+    const json cfs = json::parse(R"({
+        "ams": {
+            "ams_exist_bits": "1",
+            "tray_exist_bits": "3",
+            "calibrate_remain_flag": true,
+            "ams": [ { "id": "0", "info": "0001", "tray": [
+                { "id": "0", "tag_uid": "0000000000000000", "tray_type": "PLA", "tray_color": "FA7C0CFF", "remain": 74 },
+                { "id": "1", "tag_uid": "0000000000000000", "tray_type": "PLA", "tray_color": "000000FF" }
+            ] } ]
+        }
+    })");
+    DevFilaSystemParser::ParseV1_0(cfs, &obj, obj.GetFilaSystem().get(), false);
+
+    DevAms* ams = obj.GetFilaSystem()->GetAmsById("0");
+    REQUIRE(ams != nullptr);
+    CHECK(ams->GetAmsType() == DevAms::AMS);
+    CHECK(obj.GetFilaSystem()->IsDetectRemainEnabled());
+
+    DevAmsTray* reported = obj.GetFilaSystem()->GetAmsTray("0", "0");
+    DevAmsTray* missing  = obj.GetFilaSystem()->GetAmsTray("0", "1");
+    REQUIRE(reported != nullptr);
+    REQUIRE(missing != nullptr);
+    CHECK(reported->remain == 74);
+    CHECK(missing->remain == -1);
+}
+
 TEST_CASE("Switch-bound AMS trays map to the left extruder", "[DevMapping]")
 {
     MachineObject obj(nullptr, nullptr, "test", "test_dev", "127.0.0.1");

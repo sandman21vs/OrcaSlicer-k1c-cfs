@@ -474,7 +474,9 @@ void CrealityPrintAgent::publish_cfs_slots(const std::vector<CFSSlot>& slots, in
         }
     }
 
-    build_ams_payload(box_count, max_slots - 1, trays);
+    // A CFS is a four-slot box like the AMS, and the AMS view draws each spool's level, which
+    // the AMS-Lite view the other Moonraker agents use does not.
+    build_ams_payload(box_count, max_slots - 1, trays, DevAmsType::AMS);
 }
 
 bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)

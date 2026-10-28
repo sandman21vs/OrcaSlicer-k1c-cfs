@@ -126,7 +126,7 @@ bool AMSinfo::parse_ams_info(MachineObject *obj, DevAms *ams, bool remain_flag, 
                     info.material_state = AMSCanType::AMS_CAN_TYPE_THIRDBRAND;
                 }
 
-                if (!DevFilaSystem::IsBBL_Filament(it->second->tag_uid) || !remain_flag) {
+                if (!DevFilaSystem::IsRemainReliable(obj, it->second->tag_uid) || !remain_flag) {
                     info.material_remain = 100;
                 } else {
                     if(it->second->remain < 0 || it->second->remain > 100) {
