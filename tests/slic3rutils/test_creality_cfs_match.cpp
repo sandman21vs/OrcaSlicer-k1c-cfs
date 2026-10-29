@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -7,6 +9,8 @@
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/Utils/CrealityPrintAgent.hpp"
+
+#include <nlohmann/json.hpp>
 
 using namespace Slic3r;
 
@@ -312,4 +316,26 @@ TEST_CASE("A reply without a connected K1 box leaves the loaded slot unknown", "
 {
     CHECK_FALSE(CrealityPrintAgent::parse_loaded_slot(box_reply(R"({"same_material":[]})")).has_value());
     CHECK_FALSE(CrealityPrintAgent::parse_loaded_slot("").has_value());
+}
+
+TEST_CASE("A K1 box update that moves the filament asks for the slots again", "[CFS][Creality]")
+{
+    std::map<std::string, std::string> seen;
+    // The subscription's first reply only records what the sync on connecting already read.
+    CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(
+        nlohmann::json::parse(R"({"T1":{"filament":"C","temperature":"27"},"same_material":[]})"), seen));
+    // A new slot in the toolhead is a change; the same slot again is not.
+    CHECK(CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"filament":"A"}})"), seen));
+    CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"filament":"A"}})"), seen));
+    // A spool put into a slot changes the material list.
+    CHECK(CrealityPrintAgent::box_update_changes_slots(
+        nlohmann::json::parse(R"({"same_material":[["101001","0000000",["T1B"],"PLA"]]})"), seen));
+}
+
+TEST_CASE("A K1 box update of its sensors alone leaves the slots as they are", "[CFS][Creality]")
+{
+    std::map<std::string, std::string> seen;
+    CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"filament":"C"}})"), seen);
+    CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(
+        nlohmann::json::parse(R"({"T1":{"temperature":"28","dry_and_humidity":"30","measuring_wheel":-1.5}})"), seen));
 }

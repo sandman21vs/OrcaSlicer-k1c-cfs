@@ -195,6 +195,12 @@ protected:
     // reads the preset bundle. Safe to call from any thread.
     void fetch_filament_info_on_main(const std::string& dev_id);
 
+    // A subclass adds to `subscribe` the printer objects, among `available`, whose changes it wants
+    // in on_status_update().
+    virtual void add_status_objects(const std::set<std::string>& /*available*/, std::set<std::string>& /*subscribe*/) const {}
+    // Each status change the printer sends, on the status stream's thread.
+    virtual void on_status_update(const std::string& /*dev_id*/, const nlohmann::json& /*updates*/) {}
+
 private:
     int handle_request(const std::string& dev_id, const std::string& json_str);
     int send_version_info(const std::string& dev_id);

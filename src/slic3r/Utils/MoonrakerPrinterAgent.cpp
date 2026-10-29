@@ -1766,6 +1766,8 @@ void MoonrakerPrinterAgent::run_status_stream(std::string dev_id, std::string ba
                         }
                     }
                 }
+
+                add_status_objects(this->available_objects, subscribe_objects);
             } else {
                 subscribe_objects.insert("extruder");
                 subscribe_objects.insert("heater_bed");
@@ -1873,6 +1875,7 @@ void MoonrakerPrinterAgent::handle_ws_message(const std::string& dev_id, const s
     // Check for subscription response (has "result.status") - initial subscription is critical
     if (json.contains("result") && json["result"].contains("status") && json["result"]["status"].is_object()) {
         update_status_cache(json["result"]["status"]);
+        on_status_update(dev_id, json["result"]["status"]);
         updated     = true;
         is_critical = true; // Initial subscription response - dispatch immediately
     }
@@ -1883,6 +1886,7 @@ void MoonrakerPrinterAgent::handle_ws_message(const std::string& dev_id, const s
         if (method == "notify_status_update" && json.contains("params") && json["params"].is_array() && !json["params"].empty() &&
             json["params"][0].is_object()) {
             update_status_cache(json["params"][0]);
+            on_status_update(dev_id, json["params"][0]);
             updated = true;
             // Note: is_critical stays false for regular status updates (telemetry)
         } else if (method == "notify_klippy_ready") {

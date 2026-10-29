@@ -431,6 +431,48 @@ std::optional<int> CrealityPrintAgent::parse_loaded_slot(const std::string& resp
     return loaded;
 }
 
+bool CrealityPrintAgent::box_update_changes_slots(const json& box_update, std::map<std::string, std::string>& seen)
+{
+    if (!box_update.is_object())
+        return false;
+
+    bool changed = false;
+    auto note    = [&](const std::string& key, const std::string& value) {
+        auto it = seen.find(key);
+        if (it == seen.end()) {
+            seen.emplace(key, value);
+        } else if (it->second != value) {
+            it->second = value;
+            changed    = true;
+        }
+    };
+
+    // The box also streams its temperature, humidity and feed wheel, which change all the time and
+    // leave the slots as they are.
+    if (box_update.contains("same_material"))
+        note("same_material", box_update["same_material"].dump());
+    for (int box_num = 1; box_num <= 4; ++box_num) {
+        const std::string key = "T" + std::to_string(box_num);
+        if (box_update.contains(key) && box_update[key].is_object() && box_update[key].contains("filament"))
+            note(key + ".filament", box_update[key]["filament"].dump());
+    }
+    return changed;
+}
+
+void CrealityPrintAgent::add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const
+{
+    if (available.count("box") != 0)
+        subscribe.insert("box");
+}
+
+void CrealityPrintAgent::on_status_update(const std::string& dev_id, const json& updates)
+{
+    // A load, unload or tool change from the printer's own screen or a print moves the filament
+    // without this app asking, so the slots are read again whenever the box reports it.
+    if (updates.contains("box") && box_update_changes_slots(updates["box"], seen_box_fields))
+        fetch_filament_info_on_main(dev_id);
+}
+
 std::string CrealityPrintAgent::query_box_object() const
 {
     const std::string url = join_url(device_info.base_url, "/printer/objects/query?box");

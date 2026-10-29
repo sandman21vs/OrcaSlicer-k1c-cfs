@@ -4,8 +4,12 @@
 #include "IPrinterAgent.hpp"
 #include "MoonrakerPrinterAgent.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -90,6 +94,15 @@ public:
     // it reports none, and nothing when the reply names no box.
     static std::optional<int> parse_loaded_slot(const std::string& response);
 
+    // Whether a change to the Klipper `box` object alters what the device page shows: the slot
+    // feeding the toolhead or the spools in the slots. `seen` keeps those fields between calls; the
+    // first sight of a field is not a change, since the sync on connecting already read it.
+    static bool box_update_changes_slots(const nlohmann::json& box_update, std::map<std::string, std::string>& seen);
+
+protected:
+    void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
+    void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
+
 private:
     // Read the Klipper `box` object over Moonraker. Empty when the printer has no such
     // object, which is every board whose CFS only answers the boxsInfo WebSocket.
@@ -101,6 +114,8 @@ private:
     // Whether the last filament sync found the Klipper `box` object, the only CFS this agent
     // knows how to command.
     std::atomic<bool> has_box_object{false};
+    // Touched only by the status stream's thread.
+    std::map<std::string, std::string> seen_box_fields;
 };
 
 } // namespace Slic3r
