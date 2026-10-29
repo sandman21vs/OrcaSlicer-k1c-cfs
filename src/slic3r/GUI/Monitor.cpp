@@ -46,6 +46,7 @@
 #include "MainFrame.hpp"
 #include "MediaPlayCtrl.h"
 #include "MediaFilePanel.h"
+#include "MoonrakerFilesPanel.hpp"
 #include "BindDialog.hpp"
 
 #include "DeviceCore/DevManager.h"
@@ -225,6 +226,9 @@ void MonitorPanel::init_tabpanel()
     add_build_step([this] {
         m_media_file_panel = new MediaFilePanel(m_tabpanel);
         m_tabpanel->AddPage(m_media_file_panel, _L("Storage"), false);
+        // Takes the Storage page's place when update_storage_page() calls for it.
+        m_moonraker_files_panel = new MoonrakerFilesPanel(m_tabpanel);
+        m_moonraker_files_panel->Hide();
     });
     add_build_step([this] {
         m_upgrade_panel = new UpgradePanel(m_tabpanel);
@@ -274,6 +278,7 @@ void MonitorPanel::on_sys_color_changed()
     m_status_info_panel->on_sys_color_changed();
     m_upgrade_panel->on_sys_color_changed();
     m_media_file_panel->Rescale();
+    m_moonraker_files_panel->on_sys_color_changed();
 }
 
 void MonitorPanel::msw_rescale()
@@ -286,6 +291,7 @@ void MonitorPanel::msw_rescale()
     //m_status_add_machine_panel->msw_rescale();
     m_status_info_panel->msw_rescale();
     m_media_file_panel->Rescale();
+    m_moonraker_files_panel->Rescale();
     m_upgrade_panel->msw_rescale();
     m_hms_panel->msw_rescale();
 
@@ -406,6 +412,7 @@ void MonitorPanel::update_all()
 
     m_side_tools->update_status(obj);
     update_firmware_page(obj);
+    update_storage_page();
 
     if (obj->is_connecting()) {
         show_status(MONITOR_CONNECTING);
@@ -435,6 +442,8 @@ void MonitorPanel::update_all()
         m_upgrade_panel->update(obj);
     } else if (current_page == m_media_file_panel) {
         m_media_file_panel->UpdateByObj(obj);
+    } else if (current_page == m_moonraker_files_panel) {
+        m_moonraker_files_panel->UpdateByObj(obj);
     }
 
     if (current_page == m_hms_panel || (obj->GetHMS()->GetHMSItems().size() != m_hms_panel->temp_hms_list.size())) {
@@ -482,6 +491,23 @@ void MonitorPanel::update_firmware_page(const MachineObject* obj)
             m_tabpanel->SetSelection(PT_STATUS);
         m_tabpanel->RemovePage(index);
     }
+}
+
+// The Storage page reads the printer's storage over Bambu's file tunnel. A printer driven through
+// Moonraker has none, so the page listing Moonraker's G-code files takes its place.
+void MonitorPanel::update_storage_page()
+{
+    wxWindow* wanted  = MoonrakerFilesPanel::is_supported() ? static_cast<wxWindow*>(m_moonraker_files_panel) : m_media_file_panel;
+    wxWindow* shown   = wanted == m_media_file_panel ? static_cast<wxWindow*>(m_moonraker_files_panel) : m_media_file_panel;
+    const int index   = m_tabpanel->FindPage(shown);
+    if (index == wxNOT_FOUND)
+        return;
+
+    if (m_tabpanel->GetCurrentPage() == shown)
+        m_tabpanel->SetSelection(PT_STATUS);
+    m_tabpanel->RemovePage(index);
+    shown->Hide();
+    m_tabpanel->InsertPage(index, wanted, _L("Storage"), false);
 }
 
 bool MonitorPanel::Show(bool show)
