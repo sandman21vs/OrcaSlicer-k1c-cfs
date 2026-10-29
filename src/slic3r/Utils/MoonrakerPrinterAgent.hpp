@@ -71,6 +71,25 @@ public:
     // Pull-mode agent (on-demand filament sync)
     FilamentSyncMode get_filament_sync_mode() const override { return FilamentSyncMode::pull; }
     bool fetch_filament_info(std::string dev_id, FilamentSyncMode sync_mode = FilamentSyncMode::pull) override;
+    // The device page's per-slot refresh. There is no RFID reader to send back to, so it reads every
+    // slot from the printer again, the same way a filament sync does.
+    int command_ams_refresh_rfid(std::string dev_id, int ams_id, int slot_id, int sequence_id, bool lan_mode) override;
+
+    // The webcam found when the printer connected; none until then, or when it has none.
+    CameraStreamMode get_camera_stream_mode() const override;
+    std::string      get_camera_url() const override;
+
+    // The first enabled webcam in a /server/webcams/list reply. Either URL may be empty, and either may
+    // be relative to the printer's web interface.
+    struct WebcamEntry
+    {
+        std::string stream_url;
+        std::string snapshot_url;
+    };
+    static bool parse_webcam_list(const std::string& response, WebcamEntry& webcam, std::string& error);
+    // Where a relative webcam URL may be served, most likely first. That is the printer's web interface,
+    // never Moonraker's own API port, which answers /webcam with a JSON 404.
+    static std::vector<std::string> webcam_origins(const std::string& base_url);
 
 protected:
     struct MoonrakerDeviceInfo
@@ -187,6 +206,9 @@ private:
                                    const std::string& api_key,
                                    uint64_t generation);
 
+    // Find the printer's webcam and remember where the camera view can open it.
+    void discover_webcam(const std::string& base_url, const std::string& api_key, const std::function<bool()>& is_stale);
+
     // System-specific filament fetch methods
     bool fetch_hh_filament_info(std::vector<AmsTrayData>& trays, int& max_lane_index);
     bool fetch_moonraker_filament_data(std::vector<AmsTrayData>& trays, int& max_lane_index);
@@ -202,6 +224,11 @@ private:
     std::string                        ssdp_announced_id;
     std::shared_ptr<ICloudServiceAgent> m_cloud_agent;
     std::string                        selected_machine;
+
+    // Written by the connection thread, read by the camera view on the UI thread.
+    mutable std::mutex webcam_mutex;
+    std::string        webcam_url;
+    CameraStreamMode   webcam_mode = CameraStreamMode::none;
 
     OnMsgArrivedFn       on_ssdp_msg_fn;
     OnPrinterConnectedFn on_printer_connected_fn;

@@ -3,6 +3,7 @@
 #include "libslic3r/AppConfig.hpp"
 #include "slic3r/Utils/bambu_networking.hpp"
 #include "slic3r/Utils/NetworkAgent.hpp"
+#include "slic3r/Utils/NetworkAgentFactory.hpp"
 
 #include "slic3r/GUI/Monitor.hpp"
 #include "slic3r/GUI/Widgets/StateColor.hpp"
@@ -123,6 +124,11 @@ AddMachinePanel::~AddMachinePanel() {
     m_button_add_machine->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(AddMachinePanel::on_add_machine), NULL, this);
 }
 
+static wxString firmware_page_title()
+{
+    return _L_CONTEXT(L_CONTEXT("Update", "Firmware"), "Firmware");
+}
+
 MonitorPanel::MonitorPanel(wxWindow* parent, wxWindowID id, const wxPoint& pos, const wxSize& size, long style)
     : wxPanel(parent, id, pos, size, style),
     m_select_machine(SelectMachinePopup(this))
@@ -222,7 +228,7 @@ void MonitorPanel::init_tabpanel()
     });
     add_build_step([this] {
         m_upgrade_panel = new UpgradePanel(m_tabpanel);
-        m_tabpanel->AddPage(m_upgrade_panel, _L_CONTEXT(L_CONTEXT("Update", "Firmware"), "Firmware"), false);
+        m_tabpanel->AddPage(m_upgrade_panel, firmware_page_title(), false);
     });
     add_build_step([this] {
         m_hms_panel = new HMSPanel(m_tabpanel);
@@ -388,7 +394,7 @@ void MonitorPanel::update_all()
     if (!obj) {
         show_status((int)MONITOR_NO_PRINTER);
         m_hms_panel->clear_hms_tag();
-        m_tabpanel->GetBtnsListCtrl()->showNewTag(3, false);
+        m_tabpanel->GetBtnsListCtrl()->showNewTag(m_tabpanel->FindPage(m_hms_panel), false);
         if (m_status_info_panel->IsShown()) {
             m_status_info_panel->m_media_play_ctrl->SetMachineObject(obj);
             m_status_info_panel->update(obj);
@@ -399,6 +405,7 @@ void MonitorPanel::update_all()
     if (obj->connection_type() != last_conn_type) { last_conn_type = obj->connection_type(); }
 
     m_side_tools->update_status(obj);
+    update_firmware_page(obj);
 
     if (obj->is_connecting()) {
         show_status(MONITOR_CONNECTING);
@@ -448,12 +455,33 @@ void MonitorPanel::update_hms_tag()
 
         if (!hmsitem.second.has_read()) {
             //show HMS new tag
-            m_tabpanel->GetBtnsListCtrl()->showNewTag(3, true);
+            m_tabpanel->GetBtnsListCtrl()->showNewTag(m_tabpanel->FindPage(m_hms_panel), true);
             return;
         }
     }
 
-    m_tabpanel->GetBtnsListCtrl()->showNewTag(3, false);
+    m_tabpanel->GetBtnsListCtrl()->showNewTag(m_tabpanel->FindPage(m_hms_panel), false);
+}
+
+// The Firmware page drives Bambu's over-the-air update, which only the agents speaking Bambu's
+// protocol carry out. Another agent's printer gets no page rather than one that cannot update it.
+// The page leaves the book without being destroyed, so the pages after it move up one place:
+// find them with FindPage(), never by their PrinterTab index.
+void MonitorPanel::update_firmware_page(const MachineObject* obj)
+{
+    const std::string& agent = obj->printer_agent_id;
+    const bool         show  = agent.empty() || agent == BBL_PRINTER_AGENT_ID || agent == ORCA_PRINTER_AGENT_ID;
+    const int          index = m_tabpanel->FindPage(m_upgrade_panel);
+    if (show == (index != wxNOT_FOUND))
+        return;
+
+    if (show) {
+        m_tabpanel->InsertPage(PT_UPDATE, m_upgrade_panel, firmware_page_title(), false);
+    } else {
+        if (m_tabpanel->GetCurrentPage() == m_upgrade_panel)
+            m_tabpanel->SetSelection(PT_STATUS);
+        m_tabpanel->RemovePage(index);
+    }
 }
 
 bool MonitorPanel::Show(bool show)
@@ -560,15 +588,16 @@ void MonitorPanel::jump_to_HMS()
         return;
     auto page = m_tabpanel->GetCurrentPage();
     if (page && page != m_hms_panel)
-        m_tabpanel->SetSelection(PT_HMS);
+        m_tabpanel->SetSelection(m_tabpanel->FindPage(m_hms_panel));
 }
 
 void MonitorPanel::jump_to_Upgrade()
 {
     if (this->IsShown()) {
-        auto page = m_tabpanel->GetCurrentPage();
-        if (page && page != m_upgrade_panel) {
-            m_tabpanel->SetSelection(PT_UPDATE);
+        auto page  = m_tabpanel->GetCurrentPage();
+        int  index = m_tabpanel->FindPage(m_upgrade_panel);
+        if (page && page != m_upgrade_panel && index != wxNOT_FOUND) {
+            m_tabpanel->SetSelection(index);
         }
     }
 }

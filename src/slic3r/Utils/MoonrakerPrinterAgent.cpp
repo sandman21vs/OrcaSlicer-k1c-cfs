@@ -223,6 +223,11 @@ int MoonrakerPrinterAgent::connect_printer(const PrinterConnectionParams& params
         std::lock_guard<std::recursive_mutex> lock(payload_mutex);
         status_cache = nlohmann::json::object();
     }
+    {
+        std::lock_guard<std::mutex> lock(webcam_mutex);
+        webcam_url.clear();
+        webcam_mode = CameraStreamMode::none;
+    }
     ws_last_emit_ms.store(0);
     ws_last_dispatch_ms.store(0);
     last_print_state.clear();
@@ -255,6 +260,11 @@ int MoonrakerPrinterAgent::disconnect_printer()
         std::lock_guard<std::recursive_mutex> lock(connect_mutex);
         device_info = MoonrakerDeviceInfo{};
         ++connect_generation;  // Invalidate any in-flight connection
+    }
+    {
+        std::lock_guard<std::mutex> lock(webcam_mutex);
+        webcam_url.clear();
+        webcam_mode = CameraStreamMode::none;
     }
 
     stop_status_stream();
@@ -2362,10 +2372,163 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
             dispatch_printer_connected(dev_id);
             BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: connect_printer completed - dev_id=" << dev_id;
         }
-    } else if (result != BAMBU_NETWORK_ERR_CANCELED) {
+    }
+
+    // Last, so a webcam that is slow to answer never holds back the printer's status.
+    if (result == BAMBU_NETWORK_SUCCESS)
+        discover_webcam(base_url, api_key, is_stale); else if (result != BAMBU_NETWORK_ERR_CANCELED) {
         // Orca todo: revist here, for now don't send error, this is set current MachineObject to null
         // dispatch_local_connect(ConnectStatusFailed, dev_id, error_msg);
     }
+}
+
+int MoonrakerPrinterAgent::command_ams_refresh_rfid(std::string dev_id, int /*ams_id*/, int /*slot_id*/, int /*sequence_id*/, bool /*lan_mode*/)
+{
+    if (fetch_filament_info(std::move(dev_id)))
+        return BAMBU_NETWORK_SUCCESS;
+    BOOST_LOG_TRIVIAL(warning) << "MoonrakerPrinterAgent: refreshing the filament slots failed";
+    return BAMBU_NETWORK_ERR_CONNECTION_TO_PRINTER_FAILED;
+}
+
+CameraStreamMode MoonrakerPrinterAgent::get_camera_stream_mode() const
+{
+    std::lock_guard<std::mutex> lock(webcam_mutex);
+    return webcam_mode;
+}
+
+std::string MoonrakerPrinterAgent::get_camera_url() const
+{
+    std::lock_guard<std::mutex> lock(webcam_mutex);
+    return webcam_url;
+}
+
+bool MoonrakerPrinterAgent::parse_webcam_list(const std::string& response, WebcamEntry& webcam, std::string& error)
+{
+    const auto json = nlohmann::json::parse(response, nullptr, false);
+    if (json.is_discarded()) {
+        error = "invalid JSON";
+        return false;
+    }
+    const auto& result = json.contains("result") ? json["result"] : json;
+    if (!result.contains("webcams") || !result["webcams"].is_array()) {
+        error = "no webcams list";
+        return false;
+    }
+    for (const auto& cam : result["webcams"]) {
+        if (!cam.is_object())
+            continue;
+        // The list includes disabled webcams.
+        if (cam.contains("enabled") && cam["enabled"].is_boolean() && !cam["enabled"].get<bool>())
+            continue;
+        WebcamEntry entry{safe_json_string(cam, "stream_url"), safe_json_string(cam, "snapshot_url")};
+        if (entry.stream_url.empty() && entry.snapshot_url.empty())
+            continue;
+        webcam = std::move(entry);
+        return true;
+    }
+    error = "no enabled webcam";
+    return false;
+}
+
+std::vector<std::string> MoonrakerPrinterAgent::webcam_origins(const std::string& base_url)
+{
+    const size_t      scheme_end = base_url.find("://");
+    const size_t      host_start = scheme_end == std::string::npos ? 0 : scheme_end + 3;
+    const std::string scheme     = scheme_end == std::string::npos ? std::string("http://") : base_url.substr(0, host_start);
+    std::string       host       = base_url.substr(host_start, base_url.find('/', host_start) - host_start);
+
+    // Drop the port, keeping an IPv6 address in its brackets.
+    const size_t bracket = host.rfind(']');
+    const size_t colon   = host.rfind(':');
+    if (colon != std::string::npos && (bracket == std::string::npos || colon > bracket))
+        host.erase(colon);
+
+    // Mainsail and Fluidd usually own the web root. Creality's K1 boards keep port 80 for their own
+    // service and serve Fluidd on 4408 and Mainsail on 4409.
+    const std::string origin = scheme + host;
+    return {origin, origin + ":4408", origin + ":4409"};
+}
+
+void MoonrakerPrinterAgent::discover_webcam(const std::string& base_url, const std::string& api_key, const std::function<bool()>& is_stale)
+{
+    auto fetch = [&](const std::string& url, int max_seconds, std::string& body) {
+        bool ok   = false;
+        auto http = Http::get(url);
+        if (!api_key.empty())
+            http.header("X-Api-Key", api_key);
+        http.timeout_connect(3)
+            .timeout_max(max_seconds)
+            .on_complete([&](std::string response, unsigned status) {
+                if (status == 200) {
+                    body = std::move(response);
+                    ok   = true;
+                }
+            })
+            .on_error([](std::string, std::string, unsigned) {})
+            .on_progress([&](Http::Progress, bool& cancel) { cancel = is_stale(); })
+            .perform_sync();
+        return ok;
+    };
+
+    std::string body;
+    std::string error;
+    WebcamEntry cam;
+    if (!fetch(join_url(base_url, "/server/webcams/list"), 10, body) || !parse_webcam_list(body, cam, error)) {
+        BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: no webcam (" << (error.empty() ? "webcams list unavailable" : error) << ")";
+        return;
+    }
+
+    const bool        snapshot_only = cam.stream_url.empty();
+    const std::string path          = snapshot_only ? cam.snapshot_url : cam.stream_url;
+    auto mode_for = [snapshot_only](const std::string& url) {
+        if (snapshot_only)
+            return CameraStreamMode::http_snapshot;
+        return boost::starts_with(url, "https://") ? CameraStreamMode::https : CameraStreamMode::http;
+    };
+
+    std::string      url;
+    CameraStreamMode mode = CameraStreamMode::none;
+    if (boost::starts_with(path, "rtsp://") || boost::starts_with(path, "rtsps://")) {
+        url  = path;
+        mode = CameraStreamMode::rtsp;
+    } else if (boost::starts_with(path, "http://") || boost::starts_with(path, "https://")) {
+        url  = path;
+        mode = mode_for(url);
+    } else if (!path.empty() && path.front() == '/') {
+        const std::vector<std::string> origins = webcam_origins(base_url);
+        if (cam.snapshot_url.empty() || cam.snapshot_url.front() != '/') {
+            url = origins.front() + path;
+        } else {
+            // Ask each origin for the snapshot, one JPEG, rather than the stream, which never ends.
+            for (const std::string& origin : origins) {
+                if (is_stale())
+                    return;
+                std::string jpeg;
+                if (fetch(origin + cam.snapshot_url, 3, jpeg) && jpeg.size() > 2 &&
+                    static_cast<unsigned char>(jpeg[0]) == 0xFF && static_cast<unsigned char>(jpeg[1]) == 0xD8) {
+                    url = origin + path;
+                    break;
+                }
+            }
+        }
+        if (!url.empty())
+            mode = mode_for(url);
+    }
+
+    if (url.empty()) {
+        BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: no reachable webcam for " << path;
+        return;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex);
+    if (is_stale())
+        return;
+    {
+        std::lock_guard<std::mutex> cam_lock(webcam_mutex);
+        webcam_url  = url;
+        webcam_mode = mode;
+    }
+    BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: webcam at " << url;
 }
 
 bool MoonrakerPrinterAgent::is_numeric(const std::string& value)

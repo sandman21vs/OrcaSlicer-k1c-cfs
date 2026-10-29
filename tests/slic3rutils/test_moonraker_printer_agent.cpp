@@ -709,3 +709,39 @@ TEST_CASE("Destroying the agent stops a stalled status query", "[MoonrakerPrinte
     // The stalled query sees the change within 1 s of curl progress.
     CHECK(destroys_within(agent, 2s));
 }
+
+TEST_CASE("The webcam list gives the first enabled webcam", "[MoonrakerPrinterAgent][Webcam]")
+{
+    const std::string reply = R"({"result":{"webcams":[
+        {"name":"off","enabled":false,"stream_url":"/off/?action=stream","snapshot_url":"/off/?action=snapshot"},
+        {"name":"1","enabled":true,"service":"mjpegstreamer-adaptive",
+         "stream_url":"/webcam/?action=stream","snapshot_url":"/webcam/?action=snapshot"}
+    ]}})";
+
+    MoonrakerPrinterAgent::WebcamEntry webcam;
+    std::string                        error;
+    REQUIRE(MoonrakerPrinterAgent::parse_webcam_list(reply, webcam, error));
+    CHECK(webcam.stream_url == "/webcam/?action=stream");
+    CHECK(webcam.snapshot_url == "/webcam/?action=snapshot");
+}
+
+TEST_CASE("A webcam list with no enabled webcam gives none", "[MoonrakerPrinterAgent][Webcam]")
+{
+    MoonrakerPrinterAgent::WebcamEntry webcam;
+    std::string                        error;
+    CHECK_FALSE(MoonrakerPrinterAgent::parse_webcam_list(R"({"result":{"webcams":[]}})", webcam, error));
+    CHECK_FALSE(MoonrakerPrinterAgent::parse_webcam_list(
+        R"({"result":{"webcams":[{"enabled":false,"stream_url":"/webcam/?action=stream"}]}})", webcam, error));
+    CHECK_FALSE(error.empty());
+}
+
+TEST_CASE("A relative webcam URL is looked for on the web interface, not on Moonraker's port", "[MoonrakerPrinterAgent][Webcam]")
+{
+    // Moonraker's API port answers /webcam with a 404. Creality K1 boards serve Fluidd on 4408 and
+    // Mainsail on 4409; most other printers serve the web interface on the root.
+    CHECK(MoonrakerPrinterAgent::webcam_origins("http://192.168.1.20:7125") ==
+          std::vector<std::string>{"http://192.168.1.20", "http://192.168.1.20:4408", "http://192.168.1.20:4409"});
+    CHECK(MoonrakerPrinterAgent::webcam_origins("https://printer.local:7130/") ==
+          std::vector<std::string>{"https://printer.local", "https://printer.local:4408", "https://printer.local:4409"});
+    CHECK(MoonrakerPrinterAgent::webcam_origins("http://[fe80::1]:7125").front() == "http://[fe80::1]");
+}
