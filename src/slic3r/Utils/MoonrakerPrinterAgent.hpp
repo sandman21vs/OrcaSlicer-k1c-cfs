@@ -221,6 +221,12 @@ protected:
     // Called once the connection to the printer is up.
     virtual void on_printer_connected(const std::string& /*dev_id*/) {}
 
+    // A subclass adds to `subscribe` the printer objects, among `available`, whose changes it wants
+    // in on_status_update().
+    virtual void add_status_objects(const std::set<std::string>& /*available*/, std::set<std::string>& /*subscribe*/) const {}
+    // Each status change the printer sends, on the status stream's thread.
+    virtual void on_status_update(const std::string& /*dev_id*/, const nlohmann::json& /*updates*/) {}
+
 private:
     int handle_request(const std::string& dev_id, const std::string& json_str);
     int send_version_info(const std::string& dev_id);

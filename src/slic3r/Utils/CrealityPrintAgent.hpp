@@ -4,8 +4,12 @@
 #include "IPrinterAgent.hpp"
 #include "MoonrakerPrinterAgent.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -83,8 +87,15 @@ public:
                                              const std::string&      brand_name,
                                              const std::string&      base_type);
 
+    // Whether a change to the Klipper `box` object alters what the device page shows: the slot
+    // feeding the toolhead or the spools in the slots. `seen` keeps those fields between calls; the
+    // first sight of a field is not a change, since the sync on connecting already read it.
+    static bool box_update_changes_slots(const nlohmann::json& box_update, std::map<std::string, std::string>& seen);
+
 protected:
     void on_printer_connected(const std::string& dev_id) override;
+    void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
+    void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
 
 private:
     // Tells the device page which slot feeds the toolhead.
@@ -93,6 +104,8 @@ private:
     // Whether the last filament sync found a K1-family board's box, the only CFS this agent knows
     // how to command. Other boards may publish a `box` object too, but none has been tried.
     std::atomic<bool> can_command_box{false};
+    // Touched only by the status stream's thread.
+    std::map<std::string, std::string> seen_box_fields;
 };
 
 } // namespace Slic3r
