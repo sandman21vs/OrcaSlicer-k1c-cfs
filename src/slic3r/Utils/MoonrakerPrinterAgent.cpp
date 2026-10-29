@@ -2374,9 +2374,20 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
         }
     }
 
-    // Last, so a webcam that is slow to answer never holds back the printer's status.
-    if (result == BAMBU_NETWORK_SUCCESS)
-        discover_webcam(base_url, api_key, is_stale); else if (result != BAMBU_NETWORK_ERR_CANCELED) {
+    if (result == BAMBU_NETWORK_SUCCESS) {
+        // The device page shows the filament slots once the printer connects, not only after a sync from
+        // the sidebar. On the main thread, since matching the slots to presets reads the preset bundle.
+        QueueOnMainFn queue_fn;
+        {
+            std::lock_guard<std::recursive_mutex> lock(state_mutex);
+            queue_fn = queue_on_main_fn;
+        }
+        if (queue_fn && !is_stale())
+            queue_fn([this, dev_id] { fetch_filament_info(dev_id); });
+
+        // Last, so a webcam that is slow to answer never holds back the printer's status.
+        discover_webcam(base_url, api_key, is_stale);
+    } else if (result != BAMBU_NETWORK_ERR_CANCELED) {
         // Orca todo: revist here, for now don't send error, this is set current MachineObject to null
         // dispatch_local_connect(ConnectStatusFailed, dev_id, error_msg);
     }
