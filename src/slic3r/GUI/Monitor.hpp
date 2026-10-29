@@ -140,6 +140,7 @@ public:
     void update_all();
 
     void update_hms_tag();
+    void update_firmware_page(const MachineObject* obj);
     bool Show(bool show);
 
     void show_status(int status);
