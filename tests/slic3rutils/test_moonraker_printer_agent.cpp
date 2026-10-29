@@ -513,6 +513,22 @@ TEST_CASE("Moonraker discovery waits for a complete device identity", "[Moonrake
     REQUIRE(announcement.at("dev_name") == "Test model");
 }
 
+TEST_CASE("Moonraker discovery announces the printer with the port it was reached on", "[MoonrakerPrinterAgent][Discovery]")
+{
+    // A connection keeps the bare host in dev_ip and the port only in the base URL; the
+    // announcement replaces the saved address, which must keep the port to reconnect to it.
+    DiscoveryAgent agent("");
+    nlohmann::json announcement;
+    agent.set_on_ssdp_msg_fn([&](std::string payload) { announcement = nlohmann::json::parse(payload); });
+
+    agent.device_info.dev_id     = "127.0.0.1:7125";
+    agent.device_info.dev_ip     = "127.0.0.1";
+    agent.device_info.base_url   = "http://127.0.0.1:7125";
+    agent.device_info.model_name = "Test model";
+    agent.start_discovery(true, false);
+    REQUIRE(announcement.at("dev_ip") == "127.0.0.1:7125");
+}
+
 TEST_CASE("Stopping the status stream gives a silent printer no more than its timeouts", "[MoonrakerPrinterAgent][StatusStream]")
 {
     // An open websocket gets the 200 ms close timeout, and a stalled object list request up to 1 s of curl progress to see the stop.

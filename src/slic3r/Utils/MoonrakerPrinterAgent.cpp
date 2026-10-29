@@ -1459,10 +1459,19 @@ void MoonrakerPrinterAgent::announce_printhost_device()
 
     const std::string model_id = device_info.model_id;
 
+    // The address the connection reached, port included, in the form GUI_App::select_machine()
+    // gives a new printer. dev_ip is the bare host, and announcing it would replace the saved
+    // address, so a printer on a port other than its host's default, such as Moonraker's 7125
+    // beside a web UI on 80, would reconnect to the wrong service after a restart.
+    std::string address = device_info.base_url;
+    for (const std::string scheme : {"https://", "http://"})
+        if (boost::istarts_with(address, scheme))
+            address.erase(0, scheme.size());
+
     nlohmann::json payload;
     payload["dev_name"]     = dev_name;
     payload["dev_id"]       = device_info.dev_id;
-    payload["dev_ip"]       = device_info.dev_ip;
+    payload["dev_ip"]       = address;
     payload["dev_type"]     = model_id.empty() ? dev_name : model_id;
     payload["dev_signal"]   = "0";
     payload["connect_type"] = "lan";
