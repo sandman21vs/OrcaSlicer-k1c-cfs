@@ -11,6 +11,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -154,8 +155,10 @@ protected:
 
     // Build ams JSON and call parser
     // `ams_type` picks how the device page draws each unit; an AMS-Lite unit shows no filament level.
+    // `loaded_slot` is the slot index whose filament is in the toolhead, -1 when none is; without it
+    // the device page keeps whatever it last knew.
     void build_ams_payload(int ams_count, int max_lane_index, const std::vector<AmsTrayData>& trays,
-                           DevAmsType ams_type = DevAmsType::AMS_LITE);
+                           DevAmsType ams_type = DevAmsType::AMS_LITE, std::optional<int> loaded_slot = std::nullopt);
 
     // Methods that derived classes may need to override or access
     virtual bool init_device_info(const std::string& dev_id, const std::string& dev_ip, const std::string& username, const std::string& password, bool use_ssl, const std::string& port);

@@ -287,3 +287,29 @@ TEST_CASE("Refreshing a K1 box slot addresses the box from 1 and the slot as a b
     CHECK(CrealityPrintAgent::refresh_slot_gcode(0, 0) == "BOX_INFO_REFRESH ADDR=1 NUM=1");
     CHECK(CrealityPrintAgent::refresh_slot_gcode(1, 3) == "BOX_INFO_REFRESH ADDR=2 NUM=8");
 }
+
+TEST_CASE("A K1 box names the slot in the toolhead across the box chain", "[CFS][Creality]")
+{
+    // Each connected box reports its own feeding slot; slot C of box 2 is index 6.
+    const std::string response = box_reply(R"({"same_material":[],
+        "T1":{"state":"connect","filament":"None"},
+        "T2":{"state":"connect","filament":"C"},
+        "T3":{"state":"None","filament":"None"}})");
+    const auto loaded = CrealityPrintAgent::parse_loaded_slot(response);
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == 6);
+}
+
+TEST_CASE("A K1 box with nothing in the toolhead reports no loaded slot", "[CFS][Creality]")
+{
+    const auto loaded = CrealityPrintAgent::parse_loaded_slot(
+        box_reply(R"({"same_material":[],"T1":{"state":"connect","filament":"None"}})"));
+    REQUIRE(loaded.has_value());
+    CHECK(*loaded == -1);
+}
+
+TEST_CASE("A reply without a connected K1 box leaves the loaded slot unknown", "[CFS][Creality]")
+{
+    CHECK_FALSE(CrealityPrintAgent::parse_loaded_slot(box_reply(R"({"same_material":[]})")).has_value());
+    CHECK_FALSE(CrealityPrintAgent::parse_loaded_slot("").has_value());
+}

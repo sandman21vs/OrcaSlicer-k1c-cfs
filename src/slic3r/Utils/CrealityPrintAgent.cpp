@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -406,6 +407,30 @@ bool CrealityPrintAgent::parse_box_response(const std::string&    response,
     return true;
 }
 
+// Each connected box reports under its own "T<n>" key which of its slots feeds the toolhead,
+// as the slot's letter, or "None":
+//   { "result": { "status": { "box": { "T1": { "state": "connect", "filament": "A" } } } } }
+std::optional<int> CrealityPrintAgent::parse_loaded_slot(const std::string& response)
+{
+    const json resp = json::parse(response, nullptr, false);
+    if (resp.is_discarded() || !resp.contains("result") || !resp["result"].contains("status")
+        || !resp["result"]["status"].contains("box"))
+        return std::nullopt;
+
+    const auto&        box = resp["result"]["status"]["box"];
+    std::optional<int> loaded;
+    for (int box_num = 1; box_num <= 4; ++box_num) {
+        const std::string key = "T" + std::to_string(box_num);
+        if (!box.contains(key) || !box[key].is_object() || box[key].value("state", "") != "connect")
+            continue;
+        loaded = loaded.value_or(-1);
+        const std::string filament = box[key].value("filament", "");
+        if (filament.size() == 1 && filament[0] >= 'A' && filament[0] <= 'D')
+            return (box_num - 1) * 4 + (filament[0] - 'A');
+    }
+    return loaded;
+}
+
 std::string CrealityPrintAgent::query_box_object() const
 {
     const std::string url = join_url(device_info.base_url, "/printer/objects/query?box");
@@ -433,7 +458,7 @@ std::string CrealityPrintAgent::query_box_object() const
     return ok ? body : std::string();
 }
 
-void CrealityPrintAgent::publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count)
+void CrealityPrintAgent::publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count, std::optional<int> loaded_slot)
 {
     // Index loaded slots by (box, slot) for O(1) lookup as we walk the full
     // box_count * 4 grid, emitting an AmsTrayData entry for each physical slot.
@@ -476,7 +501,7 @@ void CrealityPrintAgent::publish_cfs_slots(const std::vector<CFSSlot>& slots, in
 
     // A CFS is a four-slot box like the AMS, and the AMS view draws each spool's level, which
     // the AMS-Lite view the other Moonraker agents use does not.
-    build_ams_payload(box_count, max_slots - 1, trays, DevAmsType::AMS);
+    build_ams_payload(box_count, max_slots - 1, trays, DevAmsType::AMS, loaded_slot);
 }
 
 bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)
@@ -518,9 +543,10 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
     // may be served by another web UI, and a `box` object is itself proof of a CFS.
     // A K1 board that also runs Creality's own service answers both; the `box` object is still
     // what Load, Unload and the slot refresh command, so its presence is checked either way.
+    const std::string    box_reply = query_box_object();
     std::vector<CFSSlot> box_slots;
     int                  box_object_count = 0;
-    if (!parse_box_response(query_box_object(), box_slots, box_object_count, parse_err))
+    if (!parse_box_response(box_reply, box_slots, box_object_count, parse_err))
         BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: no Moonraker `box` object (" << parse_err << ")";
     has_box_object = box_object_count > 0;
     if (box_count == 0) {
@@ -541,7 +567,7 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
         << "CrealityPrintAgent: " << box_count << " CFS box(es), "
         << slots.size() << " loaded slot(s)";
 
-    publish_cfs_slots(slots, box_count);
+    publish_cfs_slots(slots, box_count, parse_loaded_slot(box_reply));
     return true;
 }
 

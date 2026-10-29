@@ -5,6 +5,7 @@
 #include "MoonrakerPrinterAgent.hpp"
 
 #include <atomic>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -85,13 +86,17 @@ public:
                                    int&                  box_count,
                                    std::string&          error);
 
+    // The slot index, four per box, whose filament a K1-family box reports in the toolhead, -1 when
+    // it reports none, and nothing when the reply names no box.
+    static std::optional<int> parse_loaded_slot(const std::string& response);
+
 private:
     // Read the Klipper `box` object over Moonraker. Empty when the printer has no such
     // object, which is every board whose CFS only answers the boxsInfo WebSocket.
     std::string query_box_object() const;
 
     // Turn a parsed slot list into the AMS payload the filament views read.
-    void publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count);
+    void publish_cfs_slots(const std::vector<CFSSlot>& slots, int box_count, std::optional<int> loaded_slot);
 
     // Whether the last filament sync found the Klipper `box` object, the only CFS this agent
     // knows how to command.
