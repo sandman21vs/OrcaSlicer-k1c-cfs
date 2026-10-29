@@ -58,6 +58,7 @@ namespace Slic3r {
 namespace GUI {
 
 class MediaFilePanel;
+class MoonrakerFilesPanel;
 
 class AddMachinePanel : public wxPanel
 {
@@ -84,6 +85,7 @@ private:
 
     StatusPanel*        m_status_info_panel{ nullptr };
     MediaFilePanel*     m_media_file_panel{ nullptr };
+    MoonrakerFilesPanel* m_moonraker_files_panel{ nullptr };
     UpgradePanel*       m_upgrade_panel{ nullptr };
     HMSPanel*           m_hms_panel{ nullptr };
 
@@ -141,6 +143,7 @@ public:
 
     void update_hms_tag();
     void update_firmware_page(const MachineObject* obj);
+    void update_storage_page();
     bool Show(bool show);
 
     void show_status(int status);

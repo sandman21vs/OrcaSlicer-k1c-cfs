@@ -2531,6 +2531,207 @@ void MoonrakerPrinterAgent::discover_webcam(const std::string& base_url, const s
     BOOST_LOG_TRIVIAL(info) << "MoonrakerPrinterAgent: webcam at " << url;
 }
 
+std::pair<std::string, std::string> MoonrakerPrinterAgent::connection_snapshot()
+{
+    std::lock_guard<std::recursive_mutex> lock(connect_mutex);
+    return {device_info.base_url, device_info.api_key};
+}
+
+bool MoonrakerPrinterAgent::moonraker_request(Http http, const std::string& api_key, std::string& body, int max_seconds,
+                                              const std::function<bool()>& cancelled)
+{
+    bool ok = false;
+    if (!api_key.empty())
+        http.header("X-Api-Key", api_key);
+    http.timeout_connect(5)
+        .timeout_max(max_seconds)
+        .on_complete([&](std::string response, unsigned status) {
+            if (status >= 200 && status < 300) {
+                body = std::move(response);
+                ok   = true;
+            } else {
+                body = "HTTP " + std::to_string(status);
+            }
+        })
+        .on_error([&](std::string, std::string error, unsigned status) {
+            body = status > 0 ? error + " (HTTP " + std::to_string(status) + ")" : error;
+        });
+    if (cancelled)
+        http.on_progress([&](Http::Progress, bool& cancel) { cancel = cancelled(); });
+    http.perform_sync();
+    return ok;
+}
+
+// A path under a Moonraker root, each segment URL-encoded and the separators kept.
+static std::string encode_file_path(const std::string& path)
+{
+    std::vector<std::string> segments;
+    boost::split(segments, path, boost::is_any_of("/"));
+    for (std::string& segment : segments)
+        segment = Http::url_encode(segment);
+    return boost::join(segments, "/");
+}
+
+bool MoonrakerPrinterAgent::parse_file_list(const std::string& response, std::vector<PrinterFile>& files, std::string& error)
+{
+    const auto json = nlohmann::json::parse(response, nullptr, false);
+    if (json.is_discarded()) {
+        error = "invalid JSON";
+        return false;
+    }
+    const auto& result = json.contains("result") ? json["result"] : json;
+    if (!result.is_array()) {
+        error = "unexpected file list";
+        return false;
+    }
+
+    files.clear();
+    for (const auto& entry : result) {
+        if (!entry.is_object())
+            continue;
+        PrinterFile file;
+        file.path = safe_json_string(entry, "path");
+        // The gcodes root also holds each file's thumbnails; only G-code can be printed.
+        const std::string ext = boost::to_lower_copy(boost::filesystem::path(file.path).extension().string());
+        if (ext != ".gcode" && ext != ".g" && ext != ".gco")
+            continue;
+        if (entry.contains("modified") && entry["modified"].is_number())
+            file.modified = entry["modified"].get<double>();
+        if (entry.contains("size") && entry["size"].is_number_unsigned())
+            file.size = entry["size"].get<uint64_t>();
+        files.push_back(std::move(file));
+    }
+    std::stable_sort(files.begin(), files.end(), [](const PrinterFile& a, const PrinterFile& b) { return a.modified > b.modified; });
+    return true;
+}
+
+void MoonrakerPrinterAgent::parse_file_metadata(const std::string& response, PrinterFile& file)
+{
+    const auto json = nlohmann::json::parse(response, nullptr, false);
+    if (json.is_discarded())
+        return;
+    const auto& result = json.contains("result") ? json["result"] : json;
+    if (!result.is_object())
+        return;
+
+    if (result.contains("estimated_time") && result["estimated_time"].is_number())
+        file.estimated_time = static_cast<int>(result["estimated_time"].get<double>());
+
+    // The smallest thumbnail at least 96 px wide, which the list shows without a blurry upscale, else
+    // the largest there is. Its path is relative to the G-code file's folder.
+    std::string chosen;
+    int         chosen_width = 0;
+    if (result.contains("thumbnails") && result["thumbnails"].is_array()) {
+        for (const auto& thumbnail : result["thumbnails"]) {
+            const std::string path  = safe_json_string(thumbnail, "relative_path");
+            const int         width = safe_json_int(thumbnail, "width");
+            if (path.empty())
+                continue;
+            const bool fits    = width >= 96;
+            const bool fitted  = chosen_width >= 96;
+            const bool better  = chosen.empty() || (fits && (!fitted || width < chosen_width)) || (!fits && !fitted && width > chosen_width);
+            if (better) {
+                chosen       = path;
+                chosen_width = width;
+            }
+        }
+    }
+    if (!chosen.empty()) {
+        const std::string folder = boost::filesystem::path(file.path).parent_path().generic_string();
+        file.thumbnail           = folder.empty() ? chosen : folder + "/" + chosen;
+    }
+}
+
+void MoonrakerPrinterAgent::parse_print_history(const std::string& response, std::vector<PrinterFile>& files)
+{
+    const auto json = nlohmann::json::parse(response, nullptr, false);
+    if (json.is_discarded())
+        return;
+    const auto& result = json.contains("result") ? json["result"] : json;
+    if (!result.contains("jobs") || !result["jobs"].is_array())
+        return;
+
+    // Each file's latest job, whatever order the reply lists them in.
+    std::map<std::string, std::pair<double, std::string>> latest;
+    for (const auto& job : result["jobs"]) {
+        const std::string filename = safe_json_string(job, "filename");
+        if (filename.empty())
+            continue;
+        const double start = job.contains("start_time") && job["start_time"].is_number() ? job["start_time"].get<double>() : 0.;
+        auto         it    = latest.find(filename);
+        if (it == latest.end() || start > it->second.first)
+            latest[filename] = {start, safe_json_string(job, "status")};
+    }
+    for (PrinterFile& file : files)
+        if (auto it = latest.find(file.path); it != latest.end())
+            file.last_status = it->second.second;
+}
+
+bool MoonrakerPrinterAgent::list_files(std::vector<PrinterFile>& files, std::string& error, const std::function<bool()>& cancelled)
+{
+    const auto [base_url, api_key] = connection_snapshot();
+    if (base_url.empty()) {
+        error = "printer not connected";
+        return false;
+    }
+
+    std::string body;
+    if (!moonraker_request(Http::get(join_url(base_url, "/server/files/list?root=gcodes")), api_key, body, 15, cancelled)) {
+        error = body;
+        return false;
+    }
+    if (!parse_file_list(body, files, error))
+        return false;
+
+    // A printer without Moonraker's history component just shows no last print.
+    if (moonraker_request(Http::get(join_url(base_url, "/server/history/list?limit=200&order=desc")), api_key, body, 10, cancelled))
+        parse_print_history(body, files);
+    return true;
+}
+
+bool MoonrakerPrinterAgent::load_file_metadata(PrinterFile& file, const std::function<bool()>& cancelled)
+{
+    const auto [base_url, api_key] = connection_snapshot();
+    std::string body;
+    if (!moonraker_request(Http::get(join_url(base_url, "/server/files/metadata?filename=" + Http::url_encode(file.path))), api_key, body,
+                           10, cancelled))
+        return false;
+    parse_file_metadata(body, file);
+    return true;
+}
+
+bool MoonrakerPrinterAgent::download_file(const std::string& path, std::string& data, std::string& error)
+{
+    const auto [base_url, api_key] = connection_snapshot();
+    if (moonraker_request(Http::get(join_url(base_url, "/server/files/gcodes/" + encode_file_path(path))), api_key, data, 30))
+        return true;
+    error = data;
+    data.clear();
+    return false;
+}
+
+bool MoonrakerPrinterAgent::delete_file(const std::string& path, std::string& error)
+{
+    const auto [base_url, api_key] = connection_snapshot();
+    std::string body;
+    if (moonraker_request(Http::del(join_url(base_url, "/server/files/gcodes/" + encode_file_path(path))), api_key, body, 15))
+        return true;
+    error = body;
+    return false;
+}
+
+bool MoonrakerPrinterAgent::print_file(const std::string& path, std::string& error)
+{
+    const auto [base_url, api_key] = connection_snapshot();
+    auto http = Http::post(join_url(base_url, "/printer/print/start"));
+    http.header("Content-Type", "application/json").set_post_body(nlohmann::json{{"filename", path}}.dump());
+    std::string body;
+    if (moonraker_request(std::move(http), api_key, body, 15))
+        return true;
+    error = body;
+    return false;
+}
+
 bool MoonrakerPrinterAgent::is_numeric(const std::string& value)
 {
     return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c) != 0; });

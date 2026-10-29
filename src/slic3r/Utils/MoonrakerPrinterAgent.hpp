@@ -18,7 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <vector>
 
-namespace Slic3r { class ICloudServiceAgent; }
+namespace Slic3r { class ICloudServiceAgent; class Http; }
 
 namespace Slic3r {
 
@@ -90,6 +90,30 @@ public:
     // Where a relative webcam URL may be served, most likely first. That is the printer's web interface,
     // never Moonraker's own API port, which answers /webcam with a JSON 404.
     static std::vector<std::string> webcam_origins(const std::string& base_url);
+
+    // A G-code file stored on the printer, as the device page's file list shows it.
+    struct PrinterFile
+    {
+        std::string path;               // relative to the gcodes root
+        double      modified = 0;       // seconds since the epoch
+        uint64_t    size = 0;
+        int         estimated_time = 0; // seconds, 0 when unknown
+        std::string thumbnail;          // relative to the gcodes root, empty when the file has none
+        std::string last_status;        // how its latest print ended, empty when it was never printed
+    };
+    // The G-code files of a /server/files/list reply, newest first.
+    static bool parse_file_list(const std::string& response, std::vector<PrinterFile>& files, std::string& error);
+    static void parse_file_metadata(const std::string& response, PrinterFile& file);
+    static void parse_print_history(const std::string& response, std::vector<PrinterFile>& files);
+
+    // Blocking requests for the device page's file list; run them off the UI thread.
+    // The file list carries each file's name, date and last print; its estimated time and thumbnail come
+    // from load_file_metadata(), one request per file.
+    bool list_files(std::vector<PrinterFile>& files, std::string& error, const std::function<bool()>& cancelled);
+    bool load_file_metadata(PrinterFile& file, const std::function<bool()>& cancelled);
+    bool download_file(const std::string& path, std::string& data, std::string& error);
+    bool delete_file(const std::string& path, std::string& error);
+    bool print_file(const std::string& path, std::string& error);
 
 protected:
     struct MoonrakerDeviceInfo
@@ -205,6 +229,12 @@ private:
                                    const std::string& base_url,
                                    const std::string& api_key,
                                    uint64_t generation);
+
+    // The connected printer's Moonraker URL and API key, read under connect_mutex.
+    std::pair<std::string, std::string> connection_snapshot();
+    // One blocking request. On success `body` holds the reply, otherwise a description of the failure.
+    static bool moonraker_request(Http http, const std::string& api_key, std::string& body, int max_seconds,
+                                  const std::function<bool()>& cancelled = {});
 
     // Find the printer's webcam and remember where the camera view can open it.
     void discover_webcam(const std::string& base_url, const std::string& api_key, const std::function<bool()>& is_stale);

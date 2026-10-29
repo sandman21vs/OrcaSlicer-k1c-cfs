@@ -745,3 +745,64 @@ TEST_CASE("A relative webcam URL is looked for on the web interface, not on Moon
           std::vector<std::string>{"https://printer.local", "https://printer.local:4408", "https://printer.local:4409"});
     CHECK(MoonrakerPrinterAgent::webcam_origins("http://[fe80::1]:7125").front() == "http://[fe80::1]");
 }
+
+TEST_CASE("The printer file list keeps the G-code files, newest first", "[MoonrakerPrinterAgent][Files]")
+{
+    // The gcodes root also holds the thumbnails Moonraker extracts from each file.
+    const std::string reply = R"({"result":[
+        {"path":"older.gcode","modified":1000.0,"size":10},
+        {"path":".thumbs/newer-300x300.png","modified":3000.0,"size":5},
+        {"path":"parts/newer.gcode","modified":2000.0,"size":20},
+        {"path":"notes.txt","modified":4000.0,"size":1}
+    ]})";
+
+    std::vector<MoonrakerPrinterAgent::PrinterFile> files;
+    std::string                                     error;
+    REQUIRE(MoonrakerPrinterAgent::parse_file_list(reply, files, error));
+    REQUIRE(files.size() == 2);
+    CHECK(files[0].path == "parts/newer.gcode");
+    CHECK(files[0].size == 20);
+    CHECK(files[1].path == "older.gcode");
+}
+
+TEST_CASE("A printer file's thumbnail is found next to the file and sized for the list", "[MoonrakerPrinterAgent][Files]")
+{
+    // Thumbnail paths are relative to the G-code file's folder. The smallest one at least 96 px wide is
+    // enough for the list.
+    MoonrakerPrinterAgent::PrinterFile file;
+    file.path = "parts/bracket.gcode";
+    MoonrakerPrinterAgent::parse_file_metadata(R"({"result":{"estimated_time":4620.5,"thumbnails":[
+        {"width":32,"height":32,"relative_path":".thumbs/bracket-32x32.png"},
+        {"width":300,"height":300,"relative_path":".thumbs/bracket-300x300.png"},
+        {"width":96,"height":96,"relative_path":".thumbs/bracket-96x96.png"}
+    ]}})", file);
+    CHECK(file.estimated_time == 4620);
+    CHECK(file.thumbnail == "parts/.thumbs/bracket-96x96.png");
+
+    // With only small thumbnails, the largest one.
+    MoonrakerPrinterAgent::PrinterFile small;
+    small.path = "tiny.gcode";
+    MoonrakerPrinterAgent::parse_file_metadata(R"({"result":{"thumbnails":[
+        {"width":32,"relative_path":".thumbs/tiny-32x32.png"},{"width":48,"relative_path":".thumbs/tiny-48x48.png"}
+    ]}})", small);
+    CHECK(small.thumbnail == ".thumbs/tiny-48x48.png");
+    CHECK(small.estimated_time == 0);
+}
+
+TEST_CASE("A printer file shows how its latest print ended", "[MoonrakerPrinterAgent][Files]")
+{
+    std::vector<MoonrakerPrinterAgent::PrinterFile> files(3);
+    files[0].path = "reprinted.gcode";
+    files[1].path = "printed_once.gcode";
+    files[2].path = "never.gcode";
+
+    // Listed oldest first on purpose: the latest job decides, not the reply's order.
+    MoonrakerPrinterAgent::parse_print_history(R"({"result":{"jobs":[
+        {"filename":"reprinted.gcode","status":"cancelled","start_time":100.0},
+        {"filename":"printed_once.gcode","status":"completed","start_time":150.0},
+        {"filename":"reprinted.gcode","status":"completed","start_time":200.0}
+    ]}})", files);
+    CHECK(files[0].last_status == "completed");
+    CHECK(files[1].last_status == "completed");
+    CHECK(files[2].last_status.empty());
+}

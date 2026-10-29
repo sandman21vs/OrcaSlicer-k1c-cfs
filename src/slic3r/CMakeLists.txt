@@ -380,6 +380,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/MarkdownTip.hpp
     GUI/MediaFilePanel.cpp
     GUI/MediaFilePanel.h
+    GUI/MoonrakerFilesPanel.cpp
+    GUI/MoonrakerFilesPanel.hpp
     GUI/MediaPlayCtrl.cpp
     GUI/MediaPlayCtrl.h
     GUI/WebRtcMediaController.cpp
