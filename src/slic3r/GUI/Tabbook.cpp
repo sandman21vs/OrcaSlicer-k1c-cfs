@@ -166,7 +166,8 @@ void TabButtonsListCtrl::RemovePage(size_t n)
     TabButton *btn = m_pageButtons[n];
     m_pageButtons.erase(m_pageButtons.begin() + n);
     m_buttons_sizer->Remove(n);
-    btn->Reparent(nullptr);
+    m_buttons_sizer->SetRows(m_pageButtons.size() + 1);
+    // Destroyed as this list's child: reparenting it to nullptr first crashes on macOS.
     btn->Destroy();
     m_sizer->Layout();
 }
