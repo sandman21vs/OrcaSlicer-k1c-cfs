@@ -256,3 +256,34 @@ TEST_CASE("A Moonraker printer without a box object reports no CFS", "[CFS][Crea
     CHECK(box_count == 0);
     CHECK_FALSE(error.empty());
 }
+
+TEST_CASE("Loading a K1 box slot homes, heats and selects the slot across the box chain", "[CFS][Creality]")
+{
+    // Four slots per box, so slot C of the second box (both counted from 0 here) is T6.
+    const std::string gcode = CrealityPrintAgent::change_filament_gcode(true, 1, 2, 240);
+    CHECK(gcode.find("IF_NEED_HOME") != std::string::npos);
+    CHECK(gcode.find("M109 S240") != std::string::npos);
+    CHECK(gcode.find("T6") != std::string::npos);
+    CHECK(gcode.find("IF_NEED_HOME") < gcode.find("T6"));
+    CHECK(gcode.find("M109") < gcode.find("T6"));
+}
+
+TEST_CASE("Unloading the K1 box hands the filament back to the box and turns the nozzle off", "[CFS][Creality]")
+{
+    const std::string gcode = CrealityPrintAgent::change_filament_gcode(false, 0, 255, 210);
+    CHECK(gcode.find("M109 S210") != std::string::npos);
+    CHECK(gcode.find("BOX_QUIT_MATERIAL") != std::string::npos);
+    CHECK(gcode.find("\nT") == std::string::npos); // no tool change line
+    CHECK(gcode.find("M104 S0") > gcode.find("BOX_QUIT_MATERIAL")); // nothing left in the nozzle to keep hot
+}
+
+TEST_CASE("A K1 box filament change with no known temperature uses the box's default", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::change_filament_gcode(true, 0, 0, -1).find("M109 S220") != std::string::npos);
+}
+
+TEST_CASE("Refreshing a K1 box slot addresses the box from 1 and the slot as a bit", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::refresh_slot_gcode(0, 0) == "BOX_INFO_REFRESH ADDR=1 NUM=1");
+    CHECK(CrealityPrintAgent::refresh_slot_gcode(1, 3) == "BOX_INFO_REFRESH ADDR=2 NUM=8");
+}

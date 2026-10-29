@@ -1275,7 +1275,7 @@ bool MoonrakerPrinterAgent::query_printer_status(const std::string&           ba
 }
 
 void MoonrakerPrinterAgent::send_gcode_async(const std::string& dev_id, const std::string& gcode,
-                                             std::function<void(bool)> on_result) const
+                                             std::function<void(bool)> on_result, long timeout_max_s) const
 {
     (void) dev_id;
     const std::string base_url = device_info.base_url;
@@ -1287,7 +1287,7 @@ void MoonrakerPrinterAgent::send_gcode_async(const std::string& dev_id, const st
     http.header("Content-Type", "application/json")
         .set_post_body(nlohmann::json{{"script", gcode}}.dump())
         .timeout_connect(5)
-        .timeout_max(10)
+        .timeout_max(timeout_max_s)
         .on_complete([on_result](std::string body, unsigned status_code) {
             (void) body;
             const bool success = status_code == 200;
@@ -2376,14 +2376,9 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
 
     if (result == BAMBU_NETWORK_SUCCESS) {
         // The device page shows the filament slots once the printer connects, not only after a sync from
-        // the sidebar. On the main thread, since matching the slots to presets reads the preset bundle.
-        QueueOnMainFn queue_fn;
-        {
-            std::lock_guard<std::recursive_mutex> lock(state_mutex);
-            queue_fn = queue_on_main_fn;
-        }
-        if (queue_fn && !is_stale())
-            queue_fn([this, dev_id] { fetch_filament_info(dev_id); });
+        // the sidebar.
+        if (!is_stale())
+            fetch_filament_info_on_main(dev_id);
 
         // Last, so a webcam that is slow to answer never holds back the printer's status.
         discover_webcam(base_url, api_key, is_stale);
@@ -2391,6 +2386,17 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
         // Orca todo: revist here, for now don't send error, this is set current MachineObject to null
         // dispatch_local_connect(ConnectStatusFailed, dev_id, error_msg);
     }
+}
+
+void MoonrakerPrinterAgent::fetch_filament_info_on_main(const std::string& dev_id)
+{
+    QueueOnMainFn queue_fn;
+    {
+        std::lock_guard<std::recursive_mutex> lock(state_mutex);
+        queue_fn = queue_on_main_fn;
+    }
+    if (queue_fn)
+        queue_fn([this, dev_id] { fetch_filament_info(dev_id); });
 }
 
 int MoonrakerPrinterAgent::command_ams_refresh_rfid(std::string dev_id, int /*ams_id*/, int /*slot_id*/, int /*sequence_id*/, bool /*lan_mode*/)

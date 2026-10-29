@@ -516,8 +516,17 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
     // and does not answer boxsInfo at all. The object is asked for regardless of the
     // model check above: on a rooted board the port-80 /info that identifies the model
     // may be served by another web UI, and a `box` object is itself proof of a CFS.
-    if (box_count == 0 && !parse_box_response(query_box_object(), slots, box_count, parse_err))
+    // A K1 board that also runs Creality's own service answers both; the `box` object is still
+    // what Load, Unload and the slot refresh command, so its presence is checked either way.
+    std::vector<CFSSlot> box_slots;
+    int                  box_object_count = 0;
+    if (!parse_box_response(query_box_object(), box_slots, box_object_count, parse_err))
         BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: no Moonraker `box` object (" << parse_err << ")";
+    has_box_object = box_object_count > 0;
+    if (box_count == 0) {
+        slots     = std::move(box_slots);
+        box_count = box_object_count;
+    }
 
     if (box_count == 0) {
         // Neither transport found a box: the printer is in direct-spool mode, or has no
@@ -534,6 +543,77 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
 
     publish_cfs_slots(slots, box_count);
     return true;
+}
+
+std::string CrealityPrintAgent::change_filament_gcode(bool load, int ams_id, int slot_id, int nozzle_temp)
+{
+    // The box's own Tn_extrude_temp in the stock K1 box.cfg, used when the device page knows no
+    // temperature for the filaments involved.
+    constexpr int default_temp = 220;
+    const int     temp         = nozzle_temp > 0 ? nozzle_temp : default_temp;
+
+    // Both cut the filament at a fixed position, so the toolhead has to be homed. T<n> then cuts
+    // what is loaded, feeds slot n and flushes it; BOX_QUIT_MATERIAL cuts and pulls the filament
+    // back into its box, leaving nothing in the nozzle to keep hot. Slot n counts four per box
+    // across the chain.
+    std::string gcode = "IF_NEED_HOME\nM109 S" + std::to_string(temp) + "\n";
+    if (load)
+        gcode += "T" + std::to_string(ams_id * 4 + slot_id);
+    else
+        gcode += "BOX_QUIT_MATERIAL\nM104 S0";
+    return gcode;
+}
+
+std::string CrealityPrintAgent::refresh_slot_gcode(int ams_id, int slot_id)
+{
+    // ADDR counts boxes from 1; NUM is a bit mask of the slots, A being 1.
+    return "BOX_INFO_REFRESH ADDR=" + std::to_string(ams_id + 1) + " NUM=" + std::to_string(1 << slot_id);
+}
+
+int CrealityPrintAgent::send_message_to_printer(std::string dev_id, std::string json_str, int qos, int flag)
+{
+    const json j = json::parse(json_str, nullptr, false);
+    if (!has_box_object || j.is_discarded() || !j.contains("print") || j["print"].value("command", "") != "ams_change_filament")
+        return MoonrakerPrinterAgent::send_message_to_printer(std::move(dev_id), std::move(json_str), qos, flag);
+
+    const auto& cmd     = j["print"];
+    const int   ams_id  = cmd.value("ams_id", -1);
+    const int   slot_id = cmd.value("slot_id", -1);
+    // An unload marks itself with slot 255; the external spool and other virtual trays sit above
+    // the 16 boxes' ids and have no box to load them.
+    const bool  load    = slot_id != 255;
+    if (load && (ams_id < 0 || ams_id >= 16 || slot_id < 0 || slot_id > 3))
+        return ORCA_NETWORK_ERR_CMD_NOT_SUPPORTED;
+
+    const int   temp  = std::max(cmd.value("curr_temp", -1), cmd.value("tar_temp", -1));
+    const std::string gcode = change_filament_gcode(load, ams_id, slot_id, temp);
+    BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: " << (load ? "loading" : "unloading") << " the CFS: " << gcode;
+
+    // Heating, cutting and flushing take minutes; the slots are read back once the box is done.
+    send_gcode_async(dev_id, gcode, [this, dev_id](bool success) {
+        if (!success)
+            BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: the CFS did not finish changing filament";
+        fetch_filament_info_on_main(dev_id);
+    }, 600);
+    return BAMBU_NETWORK_SUCCESS;
+}
+
+int CrealityPrintAgent::command_ams_refresh_rfid(std::string dev_id, int ams_id, int slot_id, int sequence_id, bool lan_mode)
+{
+    // The device page's older form names no box and counts the slot across every box.
+    if (ams_id < 0 && slot_id >= 0) {
+        ams_id  = slot_id / 4;
+        slot_id = slot_id % 4;
+    }
+    if (!has_box_object || ams_id < 0 || slot_id < 0 || slot_id > 3)
+        return MoonrakerPrinterAgent::command_ams_refresh_rfid(std::move(dev_id), ams_id, slot_id, sequence_id, lan_mode);
+
+    send_gcode_async(dev_id, refresh_slot_gcode(ams_id, slot_id), [this, dev_id](bool success) {
+        if (!success)
+            BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: the CFS did not read the slot's tag again";
+        fetch_filament_info_on_main(dev_id);
+    }, 120);
+    return BAMBU_NETWORK_SUCCESS;
 }
 
 } // namespace Slic3r
