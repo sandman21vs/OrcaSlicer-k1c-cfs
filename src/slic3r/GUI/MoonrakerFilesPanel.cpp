@@ -185,6 +185,7 @@ void MoonrakerFilesPanel::add_row(const PrinterFile& file)
     auto thumbnail = new wxStaticBitmap(row, wxID_ANY, thumbnail_bitmap(file));
     auto name      = new Label(row, Label::Head_14, file_name(file.path), wxST_ELLIPSIZE_MIDDLE);
     name->SetToolTip(from_u8(file.path));
+    name->SetForegroundColour(m_title->GetForegroundColour());
     auto details = new Label(row, Label::Body_12, details_text(file), wxST_ELLIPSIZE_END);
     details->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#6B6B6B")));
 
