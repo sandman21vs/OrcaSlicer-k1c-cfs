@@ -420,9 +420,10 @@ class Reports
 public:
     void attach(StreamAgent& agent)
     {
-        agent.set_on_local_message_fn([this](std::string, std::string) {
+        agent.set_on_local_message_fn([this](std::string, std::string message) {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_times.push_back(std::chrono::steady_clock::now());
+            m_messages.push_back(std::move(message));
             m_changed.notify_all();
         });
     }
@@ -439,10 +440,17 @@ public:
         return m_times;
     }
 
+    std::vector<std::string> messages()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_messages;
+    }
+
 private:
     std::mutex m_mutex;
     std::condition_variable m_changed;
     std::vector<std::chrono::steady_clock::time_point> m_times;
+    std::vector<std::string> m_messages;
 };
 
 // A printer and a stream agent connected to it.
@@ -662,6 +670,21 @@ TEST_CASE("The status stream reports a printer's status over TLS", "[MoonrakerPr
     CHECK(reports.wait_for(1));
     CHECK(f.stops_within(3s));
     CHECK(f.printer.wait_for_close_frames(1));
+}
+
+TEST_CASE("A printer's status reports storage for the print to run from", "[MoonrakerPrinterAgent][StatusStream]")
+{
+    Reports reports;
+    StreamFixture f(Behavior::AnswersPings);
+    reports.attach(f.agent);
+    f.start();
+
+    REQUIRE(reports.wait_for(1));
+    const auto status = nlohmann::json::parse(reports.messages().front());
+    CHECK(status["print"]["sdcard"] == true);
+    // MachineObject also reads the storage state from bits 8-9 of home_flag
+    CHECK(((status["print"]["home_flag"].get<int>() >> 8) & 0x3) == 1);
+    CHECK(f.stops_within(3s));
 }
 
 TEST_CASE("The status stream sends no heartbeat while the printer has nothing new to report", "[MoonrakerPrinterAgent][StatusStream]")

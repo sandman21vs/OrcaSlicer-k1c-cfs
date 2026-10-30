@@ -2048,6 +2048,8 @@ nlohmann::json MoonrakerPrinterAgent::build_print_payload_locked() const
         if (homed.find('Z') != std::string::npos)
             home_flag |= 4; // bit 2
     }
+    // Bits 8-9 carry the storage state, which MachineObject reads from here after the "sdcard" key below
+    home_flag |= DevStorage::HAS_SDCARD_NORMAL << 8;
     payload["print"]["home_flag"] = home_flag;
 
     // Moonraker doesn't provide temperature ranges via API - use hardcoded defaults
@@ -2055,6 +2057,9 @@ nlohmann::json MoonrakerPrinterAgent::build_print_payload_locked() const
     payload["print"]["bed_temp_range"]    = {0, 120};   // Typical bed range
 
     payload["print"]["support_send_to_sd"] = true;
+    // Prints run from virtual_sdcard, which is always present. Without this key and the home_flag storage bits, every
+    // status push reads as "no storage" and the send dialog refuses to print.
+    payload["print"]["sdcard"] = true;
     // Detect bed_leveling support from available objects (bed_mesh or probe)
     // Default to 0 (not supported) if neither object exists
     bool has_bed_leveling                    = (available_objects.count("bed_mesh") != 0 || available_objects.count("probe") != 0);
