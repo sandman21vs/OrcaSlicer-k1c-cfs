@@ -270,6 +270,7 @@
 
 #ifdef __APPLE__
 #include "Gizmos/GLGizmosManager.hpp"
+#include "../Utils/MacDarkMode.hpp"
 #endif // __APPLE__
 
 #include <libslic3r/CutUtils.hpp>
@@ -4765,6 +4766,9 @@ void Sidebar::update_mixed_filament_list()
                     mi->SetBitmap(*icons[j]);
 #endif
                     sub_menu->Append(mi);
+#ifdef __APPLE__
+                    menu_item_show_image_in_title(mi);
+#endif
                     sub_menu->Bind(wxEVT_MENU, [this, cfg_idx, j](wxCommandEvent&) {
                         change_filament(cfg_idx, j);
                     }, mi->GetId());
