@@ -91,6 +91,7 @@ public:
     bool        cloud_print_only { false };
     bool        has_sdcard { false };
     bool        could_emmc_print { false };
+    bool        upload_only { false }; // send the file to the printer without starting the print
     bool        task_use_ams { true };
 
     DevStorage::SdcardState sdcard_state = DevStorage::SdcardState::NO_SDCARD;        
