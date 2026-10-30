@@ -168,6 +168,8 @@ protected:
                                    MoonrakerDeviceInfo&         info,
                                    std::string&                 error,
                                    const std::function<bool()>& cancelled) const;
+    // Whether the printer prints a .gcode.3mf bundle as is (its use_3mf option)
+    virtual bool accepts_3mf() const;
     void start_status_stream(const std::string& dev_id, const std::string& base_url, const std::string& api_key);
     void stop_status_stream();
 
