@@ -3,6 +3,8 @@
 
 #include <wx/event.h>
 
+class wxMenuItem;
+
 namespace Slic3r {
 namespace GUI {
 
@@ -18,6 +20,7 @@ void set_title_colour_after_set_title(void * window);
 void initGestures(void * view,  wxEvtHandler * handler);
 void openFolderForFile(wxString const & file);
 void StaticGroup_layoutBadge(void * group, void * badge);
+void menu_item_show_image_in_title(wxMenuItem * item);
 #endif
 
 

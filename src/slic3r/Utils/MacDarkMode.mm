@@ -4,8 +4,10 @@
 #include "wx/graphics.h"
 #include "wx/osx/core/cfstring.h"
 #include "wx/osx/private.h"
+#include "wx/menuitem.h"
 
 #import <algorithm>
+#import <cmath>
 
 #import <Cocoa/Cocoa.h>
 #import <Foundation/Foundation.h>
@@ -469,6 +471,33 @@ void initGestures(void * view,  wxEvtHandler * handler)
 {
     wxNSCustomOpenGLView * glView = (wxNSCustomOpenGLView *) view;
     [glView initGesturesWithHandler: handler];
+}
+
+// Recent macOS releases leave NSMenuItem images undrawn in Orca's context menus (seen on macOS 27),
+// which hides the filament colour swatches. Text attachments in the title still render, so the image moves there.
+void menu_item_show_image_in_title(wxMenuItem * item)
+{
+    NSMenuItem * ns_item = (NSMenuItem *) item->GetPeer()->GetHMenuItem();
+    NSImage * image = [ns_item image];
+    if (image == nil || image.size.height <= 0)
+        return;
+
+    NSFont * font = [NSFont menuFontOfSize:0];
+    CGFloat height = std::min<CGFloat>(image.size.height, font.pointSize + 2);
+    NSTextAttachment * attachment = [[NSTextAttachment alloc] init];
+    attachment.image = image;
+    attachment.bounds = NSMakeRect(0, std::round((font.capHeight - height) / 2), image.size.width * height / image.size.height, height);
+
+    NSMutableAttributedString * title = [[NSMutableAttributedString alloc]
+        initWithAttributedString:[NSAttributedString attributedStringWithAttachment:attachment]];
+    NSAttributedString * label = [[NSAttributedString alloc]
+        initWithString:[@"  " stringByAppendingString:[ns_item title]] attributes:@{NSFontAttributeName: font}];
+    [title appendAttributedString:label];
+    [ns_item setAttributedTitle:title];
+    [ns_item setImage:nil];
+    [label release];
+    [title release];
+    [attachment release];
 }
 
 }

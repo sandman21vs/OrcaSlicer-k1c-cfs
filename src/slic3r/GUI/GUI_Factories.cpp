@@ -42,6 +42,9 @@
 #include "slic3r/GUI/Gizmos/GLGizmosManager.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmoBase.hpp"
 #include "slic3r/GUI/GUI.hpp"
+#ifdef __APPLE__
+#include "slic3r/Utils/MacDarkMode.hpp"
+#endif
 #include "slic3r/GUI/Event.hpp"
 #include <cassert>
 #include "libslic3r/Point.hpp"
@@ -65,6 +68,14 @@ static PrinterTechnology printer_technology()
 static int filaments_count()
 {
     return wxGetApp().filaments_cnt();
+}
+
+// Filament menus identify each filament by its colour icon, which macOS doesn't draw as a menu item image.
+static void show_filament_color_icon(wxMenuItem* item)
+{
+#ifdef __APPLE__
+    menu_item_show_image_in_title(item);
+#endif
 }
 
 static bool is_improper_category(const std::string& category, const int filaments_cnt, const bool is_object_settings = true)
@@ -1173,9 +1184,9 @@ void MenuFactory::append_menu_item_change_extruder(wxMenu* menu)
         }
 
         if (icon_idx >= 0 && icon_idx < icons.size()) {
-            append_menu_item(
+            show_filament_color_icon(append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, *icons[icon_idx], menu,
-                [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+                [is_active_extruder]() { return !is_active_extruder; }, m_parent));
         } else {
             append_menu_item(
                 extruder_selection_menu, wxID_ANY, item_name, "", [i](wxCommandEvent &) { obj_list()->set_extruder_for_selected_items(i); }, "", menu,
@@ -1928,9 +1939,9 @@ void MenuFactory::create_filament_action_menu(bool init, int active_filament_men
         auto preset = wxGetApp().preset_bundle->filaments.find_preset(wxGetApp().preset_bundle->filament_presets[i]);
         wxString item_name = preset ? from_u8(preset->label(false)) : wxString::Format(_L("Filament %d"), i + 1);
 
-        append_menu_item(sub_menu, wxID_ANY, item_name, "",
+        show_filament_color_icon(append_menu_item(sub_menu, wxID_ANY, item_name, "",
             [i](wxCommandEvent&) { plater()->sidebar().change_filament(-2, i); }, *icons[i], menu,
-            []() { return true; }, m_parent);
+            []() { return true; }, m_parent));
     }
     append_submenu(menu, sub_menu, wxID_ANY, _L("Merge with"), "", "",
         [filaments_cnt]() { return filaments_cnt > 1; }, m_parent);
@@ -2627,9 +2638,9 @@ void MenuFactory::append_menu_item_change_filament(wxMenu* menu, size_t pos)
             item_name << " (" + _L("current") + ")";
         }
 
-        append_menu_item(extruder_selection_menu, wxID_ANY, item_name, "",
+        show_filament_color_icon(append_menu_item(extruder_selection_menu, wxID_ANY, item_name, "",
             [i](wxCommandEvent&) { obj_list()->set_extruder_for_selected_items(i); }, i == 0 ? wxNullBitmap : *icons[i - 1], menu,
-            [is_active_extruder]() { return !is_active_extruder; }, m_parent);
+            [is_active_extruder]() { return !is_active_extruder; }, m_parent));
     }
     if (pos == wxNOT_FOUND)
         menu->Append(wxID_ANY, name, extruder_selection_menu);
