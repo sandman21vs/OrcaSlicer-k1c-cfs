@@ -36,6 +36,8 @@
 #include "libslic3r/MultiNozzleUtils.hpp" // filament-change-gap model for the best-position popup
 #include "BackgroundSlicingProcess.hpp"   // complete type for background_process().get_current_gcode_result()
 #include "DeviceCore/DevStorage.h"
+#include "slic3r/Utils/MoonrakerPrinterAgent.hpp"
+#include "slic3r/Utils/NetworkAgent.hpp"
 
 #include <wx/event.h>
 #include <string>
@@ -706,12 +708,22 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
         ops_no_auto, "pa_value"
     );
 
+    // Orca: Moonraker printers can take the file without printing it, as their print host upload did
+    auto option_start_print = new PrintOption(
+        m_options_other,
+        _L("Start printing"),
+        _L("Off only uploads the file to the printer, to be printed from it later."),
+        ops_no_auto, "start_print"
+    );
+
     m_sizer_options = new wxGridSizer(0, 2, FromDIP(5), FromDIP(10));
+    m_sizer_options->Add(option_start_print, 0, wxEXPAND);
     m_sizer_options->Add(option_timelapse, 0, wxEXPAND);
     m_sizer_options->Add(option_auto_bed_level, 0, wxEXPAND);
     m_sizer_options->Add(option_flow_dynamics_cali, 0, wxEXPAND);
     m_sizer_options->Add(option_nozzle_offset_cali_cali, 0, wxEXPAND);
 
+    m_checkbox_list_order.push_back(option_start_print);
     m_checkbox_list_order.push_back(option_timelapse);
     m_checkbox_list_order.push_back(option_auto_bed_level);
     m_checkbox_list_order.push_back(option_flow_dynamics_cali);
@@ -722,6 +734,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_options_other->Layout();
     m_options_other->Fit();
 
+    m_checkbox_list["start_print"]   = option_start_print;
     m_checkbox_list["timelapse"]     = option_timelapse;
     m_checkbox_list["bed_leveling"]  = option_auto_bed_level;
     m_checkbox_list["flow_cali"]     = option_flow_dynamics_cali;
@@ -736,6 +749,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
         });
     }
 
+    option_start_print->Hide();
     option_auto_bed_level->Hide();
     option_flow_dynamics_cali->Hide();
     option_nozzle_offset_cali_cali->Hide();
@@ -3107,6 +3121,10 @@ void SelectMachineDialog::update_option_opts(MachineObject *obj)
         return;
     }
 
+    /*start_print*/
+    NetworkAgent* agent = wxGetApp().getAgent();
+    m_checkbox_list["start_print"]->Show(agent && dynamic_cast<MoonrakerPrinterAgent*>(agent->get_printer_agent().get()) != nullptr);
+
     /*timelapse*/
     m_checkbox_list["timelapse"]->Show();
     if (obj->is_support_internal_timelapse) {
@@ -3671,6 +3689,7 @@ void SelectMachineDialog::on_send_print()
 #endif
     m_print_job->connection_type = obj_->connection_type();
     m_print_job->cloud_print_only = obj_->is_support_cloud_print_only;
+    m_print_job->upload_only = m_checkbox_list["start_print"]->IsShown() && m_checkbox_list["start_print"]->getValue() == "off";
 
     if (m_print_type == PrintFromType::FROM_NORMAL) {
         BOOST_LOG_TRIVIAL(info) << "print_job: m_print_type = from_normal";

@@ -649,6 +649,10 @@ void PrintJob::process(Ctl &ctl)
                 result = m_agent->start_print(params, update_fn, cancel_fn, wait_fn);
             }
         }
+    } else if (this->upload_only) {
+        ctl.update_status(curr_percent, _u8L("Sending file to the printer over LAN"));
+        mark_lifecycle_started();
+        result = m_agent->start_send_gcode_to_sdcard(params, update_fn, cancel_fn, nullptr);
     } else {
         if (this->could_emmc_print) {
             ctl.update_status(curr_percent, _u8L("Sending print job over LAN"));
