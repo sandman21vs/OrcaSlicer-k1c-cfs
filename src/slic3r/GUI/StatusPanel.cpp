@@ -2840,6 +2840,7 @@ void StatusPanel::error_info_reset()
 void StatusPanel::on_print_error_clean(wxCommandEvent &event)
 {
     error_info_reset();
+    obj->printer_message.clear();
     skip_print_error = obj->print_error;
     char buf[32];
     ::sprintf(buf, "%08X", skip_print_error);
@@ -3059,7 +3060,10 @@ void StatusPanel::update_error_message()
     static int last_error = -1;
 
     if (obj->print_error <= 0) {
-        error_info_reset();
+        if (obj->printer_message.empty())
+            error_info_reset();
+        else
+            m_project_task_panel->show_error_msg(from_u8(obj->printer_message));
     } else if (obj->print_error != last_error) {
         /* clear old dialog */
         if (m_print_error_dlg) { delete m_print_error_dlg; }

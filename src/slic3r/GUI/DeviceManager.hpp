@@ -628,6 +628,8 @@ public:
 
     bool is_support_send_to_sdcard {false};
 
+    // The printer's own words for what went wrong, for agents that have no error code to show.
+    std::string printer_message;
     bool is_support_filament_backup{false};
     bool is_support_timelapse{false};
     bool is_support_update_remain{false};

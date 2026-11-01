@@ -622,3 +622,17 @@ TEST_CASE("A slot from the box object is named from the printer's material libra
     CHECK(slots[2].vendor == "Creality");
     CHECK(slots[2].brand_name == "Hyper PETG-CF");
 }
+
+TEST_CASE("A printer error is read from its console line", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::printer_error_text(R"(!! {"code":"key843", "msg":"rfid is error, get rfid: busy", "values": [1, "B"]})")
+          == "key843: rfid is error, get rfid: busy");
+    CHECK(CrealityPrintAgent::printer_error_text("!! Must home axis first") == "Must home axis first");
+}
+
+TEST_CASE("Console lines that are not errors show nothing", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::printer_error_text(R"(!! {"code":"key61, "msg":"Unknown command:SET_HOTEND_FAN", "values": ["SET_HOTEND_FAN VALUE=1"]})").empty());
+    CHECK(CrealityPrintAgent::printer_error_text("// Extruder not hot enough").empty());
+    CHECK(CrealityPrintAgent::printer_error_text("!!").empty());
+}

@@ -214,6 +214,8 @@ protected:
     // Reads the filament slots again on the main thread, since matching the slots to presets
     // reads the preset bundle. Safe to call from any thread.
     void fetch_filament_info_on_main(const std::string& dev_id);
+    // Runs `fn` on the main thread. Safe to call from any thread.
+    void run_on_main(std::function<void()> fn);
 
     // The raw reply for Moonraker's `box` printer object; empty when the printer has none.
     std::string query_box_object() const;
@@ -226,6 +228,8 @@ protected:
     virtual void add_status_objects(const std::set<std::string>& /*available*/, std::set<std::string>& /*subscribe*/) const {}
     // Each status change the printer sends, on the status stream's thread.
     virtual void on_status_update(const std::string& /*dev_id*/, const nlohmann::json& /*updates*/) {}
+    // Each line the printer writes to its G-code console, on the status stream's thread.
+    virtual void on_gcode_response(const std::string& /*dev_id*/, const std::string& /*line*/) {}
     // Adds to `print`, the status report the device page reads, what a subclass knows from `status`,
     // the printer objects as last reported. Holds the agent's state lock.
     virtual void add_print_status(const nlohmann::json& /*status*/, nlohmann::json& /*print*/) const {}

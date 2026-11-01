@@ -111,6 +111,11 @@ public:
     // it reports none, and nothing when the reply names no box.
     static std::optional<int> parse_loaded_slot(const std::string& response);
 
+    // The message of a line the printer writes to its G-code console when something fails, as
+    // shown on its screen, or an empty string for any other line. Stock macros call a command
+    // rooted firmware lacks on every print, so "Unknown command" (key61) is left out.
+    static std::string printer_error_text(const std::string& line);
+
     // Parse the boxsInfo JSON returned by CrealityPrint::query_boxes_info() into
     // a flat list of loaded slots, plus the count of CFS boxes the printer reports.
     static bool parse_cfs_response(const std::string&    response,
@@ -168,12 +173,15 @@ protected:
     void on_printer_connected(const std::string& dev_id) override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
     void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
+    void on_gcode_response(const std::string& dev_id, const std::string& line) override;
     void add_print_status(const nlohmann::json& status, nlohmann::json& print) const override;
     bool print_uploaded_file(const PrintParams& params, const std::string& filename) override;
 
 private:
     // Tells the device page which slot feeds the toolhead.
     void report_loaded_slot(int loaded_slot);
+    // Shows `message` on the device page's print progress, or clears it when empty.
+    void report_printer_message(std::string message);
     // Tells the device page how the box reads tags, from a boxConfig answer.
     void report_box_config(const std::string& response);
     int  set_cfs_slot(const nlohmann::json& print_cmd);

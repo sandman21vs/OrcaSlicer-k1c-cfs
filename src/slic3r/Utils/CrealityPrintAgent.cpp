@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <map>
 #include <optional>
+#include <regex>
 #include <set>
 #include <string>
 #include <thread>
@@ -544,6 +545,10 @@ void CrealityPrintAgent::on_status_update(const std::string& dev_id, const json&
     // without this app asking, so the slots are read again whenever the box reports it.
     if (updates.contains("box") && box_update_changes_slots(updates["box"], seen_box_fields))
         fetch_filament_info_on_main(dev_id);
+
+    // Printing again means the printer got past whatever it complained about.
+    if (updates.contains("print_stats") && updates["print_stats"].is_object() && updates["print_stats"].value("state", "") == "printing")
+        report_printer_message({});
 }
 
 void CrealityPrintAgent::add_print_status(const json& status, json& print) const
@@ -643,6 +648,42 @@ json CrealityPrintAgent::box_config_fields(const json& print_cmd)
         copy("startup_read_option", "cSelfTest");
     }
     return fields;
+}
+
+std::string CrealityPrintAgent::printer_error_text(const std::string& line)
+{
+    if (line.rfind("!!", 0) != 0)
+        return {};
+
+    // The firmware's JSON here is not always valid ({"code":"key61, "msg":...), so it is read by pattern.
+    static const std::regex code_pattern(R"re("code"\s*:\s*"(key\d+))re");
+    static const std::regex msg_pattern(R"re("msg"\s*:\s*"([^"]*)")re");
+    std::smatch             code;
+    std::smatch             msg;
+    const bool              has_code = std::regex_search(line, code, code_pattern);
+    if (has_code && code[1] == "key61")
+        return {};
+    if (has_code && std::regex_search(line, msg, msg_pattern))
+        return code[1].str() + ": " + msg[1].str();
+
+    const size_t start = line.find_first_not_of("! ");
+    return start == std::string::npos ? std::string() : line.substr(start);
+}
+
+void CrealityPrintAgent::on_gcode_response(const std::string& /*dev_id*/, const std::string& line)
+{
+    if (std::string message = printer_error_text(line); !message.empty())
+        report_printer_message(std::move(message));
+}
+
+void CrealityPrintAgent::report_printer_message(std::string message)
+{
+    run_on_main([this, message = std::move(message)] {
+        auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
+        MachineObject* obj         = dev_manager ? dev_manager->get_my_machine(device_info.dev_id) : nullptr;
+        if (obj)
+            obj->printer_message = message;
+    });
 }
 
 void CrealityPrintAgent::report_box_config(const std::string& response)

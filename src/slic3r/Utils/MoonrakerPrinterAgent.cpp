@@ -2057,6 +2057,9 @@ void MoonrakerPrinterAgent::handle_ws_message(const std::string& dev_id, const s
             on_status_update(dev_id, json["params"][0]);
             updated = true;
             // Note: is_critical stays false for regular status updates (telemetry)
+        } else if (method == "notify_gcode_response" && json.contains("params") && json["params"].is_array() && !json["params"].empty() &&
+                   json["params"][0].is_string()) {
+            on_gcode_response(dev_id, json["params"][0].get<std::string>());
         } else if (method == "notify_klippy_ready") {
             nlohmann::json updates;
             updates["print_stats"]["state"] = "standby";
@@ -2607,13 +2610,18 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
 
 void MoonrakerPrinterAgent::fetch_filament_info_on_main(const std::string& dev_id)
 {
+    run_on_main([this, dev_id] { fetch_filament_info(dev_id); });
+}
+
+void MoonrakerPrinterAgent::run_on_main(std::function<void()> fn)
+{
     QueueOnMainFn queue_fn;
     {
         std::lock_guard<std::recursive_mutex> lock(state_mutex);
         queue_fn = queue_on_main_fn;
     }
     if (queue_fn)
-        queue_fn([this, dev_id] { fetch_filament_info(dev_id); });
+        queue_fn(std::move(fn));
 }
 
 int MoonrakerPrinterAgent::command_ams_refresh_rfid(std::string dev_id, int /*ams_id*/, int /*slot_id*/, int /*sequence_id*/, bool /*lan_mode*/)
