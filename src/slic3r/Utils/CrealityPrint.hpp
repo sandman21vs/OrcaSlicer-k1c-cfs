@@ -42,6 +42,8 @@ public:
     static std::string model_display_name(const std::string& model);
     std::string query_boxes_info() const;
     std::string model_name() const;
+    // Starts a file already in the printer's gcodes folder, from extended_info as start_print_commands() reads it.
+    bool start_print(wxString& msg, const std::string& filename, const std::map<std::string, std::string>& extended_info) const;
     // The WebSocket commands that start gcode_path, built from the send dialog's
     // extended_info (enableSelfTest and the colorMatch_<n> slot mapping).
     static std::vector<std::string> start_print_commands(bool                                      multi_color,
@@ -69,7 +71,6 @@ private:
     mutable std::string m_model;
 
     std::string make_url(const std::string& path) const;
-    bool start_print(wxString& msg, const std::string& filename, const std::map<std::string, std::string>& extended_info) const;
     std::string safe_filename(const std::string& filename) const;
     void query_model() const;
 };

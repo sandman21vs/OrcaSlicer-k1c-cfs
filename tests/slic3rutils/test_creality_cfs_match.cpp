@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <map>
 #include <optional>
 #include <string>
@@ -425,4 +427,76 @@ TEST_CASE("A K1 box update of its sensors alone leaves the slots as they are", "
     CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"filament":"C"}})"), seen);
     CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(
         nlohmann::json::parse(R"({"T1":{"temperature":"28","dry_and_humidity":"30","measuring_wheel":-1.5}})"), seen));
+}
+
+namespace {
+
+CrealityPrintAgent::CFSSlot cfs_slot(int box_id, int printer_box_id, int slot_id, const std::string& type, const std::string& color)
+{
+    CrealityPrintAgent::CFSSlot slot;
+    slot.box_id         = box_id;
+    slot.printer_box_id = printer_box_id;
+    slot.slot_id        = slot_id;
+    slot.filament_type  = type;
+    slot.color_hex      = color;
+    return slot;
+}
+
+std::string mapped_onto(const std::vector<int>& trays)
+{
+    nlohmann::json mapping = nlohmann::json::array();
+    for (int tray : trays)
+        mapping.push_back({{"ams", tray}});
+    return mapping.dump();
+}
+
+} // namespace
+
+TEST_CASE("The print dialog's mapping sends each filament's G-code tool to its slot", "[CFS][Creality]")
+{
+    const std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(0, 1, 1, "PLA", "#000000"), cfs_slot(0, 1, 2, "PETG", "#ffffff")};
+
+    const auto info = CrealityPrintAgent::color_match_info(mapped_onto({2, 1}), slots);
+
+    REQUIRE(info.has_value());
+    CHECK(*info == std::map<std::string, std::string>{{"colorMatch_0", "T1A\tPETG\t#ffffff\t1\t2"}, {"colorMatch_1", "T1B\tPLA\t#000000\t1\t1"}});
+}
+
+TEST_CASE("The print dialog's mapping numbers its entries without the filaments the plate does not use", "[CFS][Creality]")
+{
+    const std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(0, 1, 1, "PLA", "#000000")};
+
+    const auto info = CrealityPrintAgent::color_match_info(mapped_onto({-1, 1}), slots);
+
+    REQUIRE(info.has_value());
+    CHECK(*info == std::map<std::string, std::string>{{"colorMatch_0", "T1B\tPLA\t#000000\t1\t1"}});
+}
+
+TEST_CASE("The print dialog's mapping names the printer's own box id", "[CFS][Creality]")
+{
+    // The K2 numbers its boxes with gaps, while the device page counts them from 0.
+    const std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(1, 3, 0, "PLA", "#000000")};
+
+    const auto info = CrealityPrintAgent::color_match_info(mapped_onto({4}), slots);
+
+    REQUIRE(info.has_value());
+    CHECK(info->at("colorMatch_0") == "T1A\tPLA\t#000000\t3\t0");
+}
+
+TEST_CASE("A print with no mapping onto the CFS leaves the colour match empty", "[CFS][Creality]")
+{
+    const std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(0, 1, 0, "PLA", "#000000")};
+    const std::string mapping = GENERATE(as<std::string>{}, "", "not json", "[]", R"([{"ams":-1}])", R"([{"ams":0},{"ams":254}])", R"([{"ams":255}])");
+    CAPTURE(mapping);
+
+    const auto info = CrealityPrintAgent::color_match_info(mapping, slots);
+
+    REQUIRE(info.has_value());
+    CHECK(info->empty());
+}
+
+TEST_CASE("A filament mapped onto a slot the CFS does not report has no colour match", "[CFS][Creality]")
+{
+    CHECK_FALSE(CrealityPrintAgent::color_match_info(mapped_onto({3}), {cfs_slot(0, 1, 0, "PLA", "#000000")}).has_value());
+    CHECK_FALSE(CrealityPrintAgent::color_match_info(mapped_onto({0}), {}).has_value());
 }

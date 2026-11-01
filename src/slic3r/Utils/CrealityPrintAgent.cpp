@@ -12,12 +12,14 @@
 #include "slic3r/GUI/DeviceCore/DevManager.h"
 
 #include <boost/log/trivial.hpp>
+#include <wx/string.h>
 #include "libslic3r/Config.hpp"
 #include <exception>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <set>
@@ -32,6 +34,19 @@ namespace Slic3r {
 namespace {
 
 constexpr const char* CrealityPrintAgent_VERSION = "0.1.0";
+
+// A CrealityPrint helper for its model detection and WebSocket commands (upstream PR #13291).
+CrealityPrint make_host(const std::string& dev_ip, const std::string& api_key)
+{
+    DynamicPrintConfig cfg;
+    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + dev_ip));
+    cfg.set_key_value("print_host_webui",            new ConfigOptionString(""));
+    cfg.set_key_value("printhost_cafile",            new ConfigOptionString(""));
+    cfg.set_key_value("printhost_port",              new ConfigOptionString(""));
+    cfg.set_key_value("printhost_apikey",            new ConfigOptionString(api_key));
+    cfg.set_key_value("printhost_ssl_ignore_revoke", new ConfigOptionBool(false));
+    return CrealityPrint(&cfg);
+}
 
 std::string to_lower(std::string s)
 {
@@ -282,6 +297,7 @@ bool CrealityPrintAgent::parse_cfs_response(const std::string&    response,
 
             CFSSlot s;
             s.box_id        = cfs_index;
+            s.printer_box_id = safe_json_int(box, "id");
             s.slot_id       = safe_json_int(mat, "id");
             s.vendor        = s_vendor;
             s.brand_name    = safe_json_string(mat, "name");
@@ -373,6 +389,65 @@ void CrealityPrintAgent::on_status_update(const std::string& dev_id, const json&
         fetch_filament_info_on_main(dev_id);
 }
 
+std::optional<std::map<std::string, std::string>> CrealityPrintAgent::color_match_info(const std::string&          ams_mapping_info,
+                                                                                        const std::vector<CFSSlot>& slots)
+{
+    std::map<std::string, std::string> info;
+    const json                         mapping = json::parse(ams_mapping_info, nullptr, false);
+    if (!mapping.is_array())
+        return info;
+
+    for (std::size_t filament = 0; filament < mapping.size(); ++filament) {
+        const json& item = mapping[filament];
+        const int   tray = item.is_object() && item.contains("ams") && item["ams"].is_number_integer() ? item["ams"].get<int>() : -1;
+        if (devPrinterUtil::IsVirtualSlot(tray))
+            return std::map<std::string, std::string>{};
+        if (tray < 0)
+            continue; // a filament the plate does not use
+
+        const auto slot = std::find_if(slots.begin(), slots.end(), [tray](const CFSSlot& s) { return s.box_id * 4 + s.slot_id == tray; });
+        if (slot == slots.end())
+            return std::nullopt;
+
+        // The firmware matches by G-code tool: T1A for the first filament, T1B for the second,
+        // whichever slot it is mapped onto. The keys count only mapped filaments, because
+        // start_print_commands() stops at the first one missing.
+        const std::string tool = "T1" + std::string(1, char('A' + filament));
+        info["colorMatch_" + std::to_string(info.size())] = tool + "\t" + slot->filament_type + "\t" + slot->color_hex + "\t" +
+                                                            std::to_string(slot->printer_box_id) + "\t" + std::to_string(slot->slot_id);
+    }
+    return info;
+}
+
+bool CrealityPrintAgent::print_uploaded_file(const PrintParams& params, const std::string& filename)
+{
+    CrealityPrint host = make_host(device_info.dev_ip, device_info.api_key);
+    if (!params.task_use_ams || !host.supports_multi_color_print())
+        return MoonrakerPrinterAgent::print_uploaded_file(params, filename);
+
+    // A failed query leaves no slots, so a filament mapped onto one is reported below.
+    std::vector<CFSSlot> slots;
+    int                  box_count = 0;
+    std::string          error;
+    if (!parse_cfs_response(host.query_boxes_info(), slots, box_count, error))
+        BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: CFS query failed before printing: " << error;
+
+    const auto info = color_match_info(params.ams_mapping_info, slots);
+    if (!info) {
+        BOOST_LOG_TRIVIAL(error) << "CrealityPrintAgent: a filament is mapped onto a slot the CFS does not report: " << params.ams_mapping_info;
+        return false;
+    }
+    if (info->empty())
+        return MoonrakerPrinterAgent::print_uploaded_file(params, filename);
+
+    wxString message;
+    if (!host.start_print(message, filename, *info)) {
+        BOOST_LOG_TRIVIAL(error) << "CrealityPrintAgent: the printer did not start the print: " << message.ToUTF8().data();
+        return false;
+    }
+    return true;
+}
+
 void CrealityPrintAgent::report_loaded_slot(int loaded_slot)
 {
     auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
@@ -395,17 +470,7 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
         return MoonrakerPrinterAgent::fetch_filament_info(std::move(dev_id));
     }
 
-    // Build a CrealityPrint helper so we can use its model detection + WS helpers
-    // (added in upstream PR #13291).
-    DynamicPrintConfig cfg;
-    cfg.set_key_value("print_host",                  new ConfigOptionString("http://" + device_info.dev_ip));
-    cfg.set_key_value("print_host_webui",            new ConfigOptionString(""));
-    cfg.set_key_value("printhost_cafile",            new ConfigOptionString(""));
-    cfg.set_key_value("printhost_port",              new ConfigOptionString(""));
-    cfg.set_key_value("printhost_apikey",            new ConfigOptionString(device_info.api_key));
-    cfg.set_key_value("printhost_ssl_ignore_revoke", new ConfigOptionBool(false));
-
-    CrealityPrint host(&cfg);
+    CrealityPrint host = make_host(device_info.dev_ip, device_info.api_key);
 
     // Only a K1-family `box` object is known to take the commands Load, Unload and the slot refresh
     // send, and it alone names the slot feeding the toolhead, whichever way the slots are read.

@@ -3,6 +3,7 @@
 
 #include "IPrinterAgent.hpp"
 #include "MoonrakerPrinterAgent.hpp"
+#include "bambu_networking.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -35,6 +36,7 @@ public:
     struct CFSSlot
     {
         int         box_id  = 0;   // CFS unit index (0 for first box, 1 for chained second box)
+        int         printer_box_id = 0; // The printer's own id for that unit
         int         slot_id = 0;   // Slot index within the box (0..3)
         std::string color_hex;     // "#RRGGBB"
         std::string filament_type; // "PLA", "ABS", "PETG", ... or "" if the printer cannot name the spool
@@ -57,6 +59,13 @@ public:
     // The device page's per-slot refresh: a K1-family box reads the slot's tag again before the
     // slots are read back.
     int command_ams_refresh_rfid(std::string dev_id, int ams_id, int slot_id, int sequence_id, bool lan_mode) override;
+
+    // The send dialog's colorMatch_<n> entries for a print's ams_mapping_info, one per filament
+    // mapped onto a CFS slot of `slots`. Empty when no filament is mapped onto a slot, or one is
+    // mapped onto the spool holder, which the firmware cannot mix with the CFS. Nothing when a
+    // mapped slot is not in `slots`.
+    static std::optional<std::map<std::string, std::string>> color_match_info(const std::string&          ams_mapping_info,
+                                                                              const std::vector<CFSSlot>& slots);
 
     // The script a K1-family box runs to load slot `slot_id` of box `ams_id` (both from 0), or to
     // unload whatever the toolhead holds when `load` is false. `nozzle_temp` is the temperature
@@ -96,6 +105,7 @@ protected:
     void on_printer_connected(const std::string& dev_id) override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
     void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
+    bool print_uploaded_file(const PrintParams& params, const std::string& filename) override;
 
 private:
     // Tells the device page which slot feeds the toolhead.
