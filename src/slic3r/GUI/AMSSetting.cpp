@@ -22,6 +22,8 @@
 #include <wx/tglbtn.h>
 #include "slic3r/GUI/wxExtensions.hpp"
 #include "slic3r/GUI/DeviceCore/DevFilaAmsSetting.h"
+#include "slic3r/GUI/DeviceManager.hpp"
+#include "slic3r/Utils/NetworkAgentFactory.hpp"
 #include "slic3r/GUI/DeviceCore/DevConfigUtil.h"
 #include <wx/event.h>
 #include <vector>
@@ -82,9 +84,7 @@ void AMSSetting::create()
     m_sizer_Insert_material_tip->Add(0, 0, 0, wxLEFT, 10);
 
     // tip line1
-    m_tip_Insert_material_line1 = new Label(m_panel_Insert_material,
-        _L("The AMS will automatically read the filament information when inserting a new Bambu Lab filament spool. This takes about 20 seconds.")
-    );
+    m_tip_Insert_material_line1 = new Label(m_panel_Insert_material, wxEmptyString);
     m_tip_Insert_material_line1->SetFont(::Label::Body_13);
     m_tip_Insert_material_line1->SetForegroundColour(AMS_SETTING_GREY700);
     m_tip_Insert_material_line1->SetSize(wxSize(AMS_SETTING_BODY_WIDTH, -1));
@@ -177,7 +177,7 @@ void AMSSetting::create()
     // tip line
     m_sizer_remain_inline = new wxBoxSizer(wxVERTICAL);
 
-    m_tip_remain_line1 = new Label(m_panel_body, _L("AMS will attempt to estimate the remaining capacity of the Bambu Lab filaments."));
+    m_tip_remain_line1 = new Label(m_panel_body, wxEmptyString);
     m_tip_remain_line1->SetFont(::Label::Body_13);
     m_tip_remain_line1->SetForegroundColour(AMS_SETTING_GREY700);
     m_tip_remain_line1->SetSize(wxSize(AMS_SETTING_BODY_WIDTH, -1));
@@ -305,6 +305,7 @@ void AMSSetting::UpdateByObj(MachineObject* obj)
     }
 
     update_ams_img(obj);
+    update_brand_tips(obj);
 
     m_ams_type->UpdateInfo(obj);
     //m_ams_arrange_order->Update(obj);
@@ -316,6 +317,22 @@ void AMSSetting::UpdateByObj(MachineObject* obj)
     update_air_printing_detection(obj);
 
     update_firmware_switching_status();// on fila_firmware_switch
+}
+
+void AMSSetting::update_brand_tips(MachineObject* obj)
+{
+    const bool bambu = obj->printer_agent_id.empty() || obj->printer_agent_id == BBL_PRINTER_AGENT_ID;
+    if (m_tips_are_bambu == bambu)
+        return;
+    m_tips_are_bambu = bambu;
+
+    m_tip_Insert_material_line1->SetLabel(
+        bambu ? _L("The AMS will automatically read the filament information when inserting a new Bambu Lab filament spool. This takes about 20 seconds.")
+              : _L("The printer will automatically read the filament information when a spool with an RFID tag is inserted."));
+    m_tip_Insert_material_line1->Wrap(AMS_SETTING_BODY_WIDTH);
+    m_tip_remain_line1->SetLabel(bambu ? _L("AMS will attempt to estimate the remaining capacity of the Bambu Lab filaments.")
+                                       : _L("The printer will attempt to estimate the remaining capacity of spools with an RFID tag."));
+    m_tip_remain_line1->Wrap(AMS_SETTING_BODY_WIDTH);
 }
 
 void AMSSetting::update_firmware_switching_status()

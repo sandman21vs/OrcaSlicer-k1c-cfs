@@ -2,6 +2,7 @@
 #define slic3r_AMSSettingDialog_hpp_
 
 #include "libslic3r/Preset.hpp"
+#include <optional>
 #include "wxExtensions.hpp"
 #include "GUI_Utils.hpp"
 #include "DeviceManager.hpp"
@@ -49,6 +50,8 @@ protected:
     void create();
 
     void update_ams_img(MachineObject* obj);
+    // The tips that name Bambu Lab spools, reworded for a printer of another brand.
+    void update_brand_tips(MachineObject* obj);
     void update_starting_read_mode(bool selected);
     void update_remain_mode(bool selected);
     void update_switch_filament(bool selected);
@@ -68,6 +71,7 @@ protected:
 
 protected:
     MachineObject *m_obj{nullptr};
+    std::optional<bool> m_tips_are_bambu;
 
     wxStaticText* m_static_ams_settings = nullptr;
 
