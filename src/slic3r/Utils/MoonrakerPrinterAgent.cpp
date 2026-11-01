@@ -649,6 +649,7 @@ void MoonrakerPrinterAgent::build_ams_payload(int ams_count, int max_lane_index,
         if (ams_type == DevAmsType::AMS) {
             ams_unit["humidity"] = "-1";
         }
+        add_ams_unit_status(ams_id, ams_unit);
         if (const std::string name = ams_unit_name(ams_id); !name.empty()) {
             ams_unit["display_name"] = name;
         }

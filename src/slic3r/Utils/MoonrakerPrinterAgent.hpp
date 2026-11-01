@@ -169,6 +169,8 @@ protected:
                            DevAmsType ams_type = DevAmsType::AMS_LITE);
     // Name shown for a filament unit, or empty for the AMS Lite name
     virtual std::string ams_unit_name(int /*ams_id*/) const { return {}; }
+    // Adds what the printer reports about a filament unit to its AMS payload entry
+    virtual void add_ams_unit_status(int /*ams_id*/, nlohmann::json& /*ams_unit*/) const {}
     // Another URL to try when Moonraker does not answer at `base_url`, or empty for none
     virtual std::string alternative_base_url(const std::string& /*base_url*/) const { return {}; }
     // A slot reported its filament level, so status reports keep the level display on

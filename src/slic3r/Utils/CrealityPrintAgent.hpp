@@ -119,6 +119,12 @@ public:
     // The Moonraker URL to try beside one that names no port, or empty when it names one.
     static std::string moonraker_base_url(const std::string& base_url);
 
+    // The humidity level of a box, from 1 to 5 with 5 the driest, in the bands of Bambu's percentage AMS.
+    static int humidity_level(double percent);
+    // The AMS fields for the temperature and humidity of each CFS box in a boxsInfo reply, numbered
+    // like parse_cfs_response() numbers the boxes. A sensor that reads no humidity adds none.
+    static std::vector<nlohmann::json> box_climates(const std::string& response);
+
     // Parse the boxsInfo JSON returned by CrealityPrint::query_boxes_info() into
     // a flat list of loaded slots, plus the count of CFS boxes the printer reports.
     static bool parse_cfs_response(const std::string&    response,
@@ -174,6 +180,7 @@ public:
 
 protected:
     void on_printer_connected(const std::string& dev_id) override;
+    void add_ams_unit_status(int ams_id, nlohmann::json& ams_unit) const override;
     std::string alternative_base_url(const std::string& base_url) const override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
     void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
@@ -197,6 +204,8 @@ private:
     std::map<std::string, std::string> seen_box_fields;
     // The printer's material library, kept once a slot has needed it. Touched only on the main thread.
     std::string material_library;
+    // What the last slot read found for each box, in AMS order.
+    std::vector<nlohmann::json> box_climate;
 };
 
 } // namespace Slic3r

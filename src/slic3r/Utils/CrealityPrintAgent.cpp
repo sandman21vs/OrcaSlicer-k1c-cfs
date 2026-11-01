@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <map>
@@ -534,13 +535,18 @@ bool CrealityPrintAgent::box_update_changes_slots(const json& box_update, std::m
     };
 
     // The box also streams its temperature, humidity and feed wheel, which change all the time and
-    // leave the slots as they are.
+    // leave the slots as they are. The humidity shown beside them is read again with each new level.
     if (box_update.contains("same_material"))
         note("same_material", box_update["same_material"].dump());
     for (int box_num = 1; box_num <= 4; ++box_num) {
         const std::string key = "T" + std::to_string(box_num);
-        if (box_update.contains(key) && box_update[key].is_object() && box_update[key].contains("filament"))
-            note(key + ".filament", box_update[key]["filament"].dump());
+        if (!box_update.contains(key) || !box_update[key].is_object())
+            continue;
+        const json& box = box_update[key];
+        if (box.contains("filament"))
+            note(key + ".filament", box["filament"].dump());
+        if (const double humidity = json_number(box, "dry_and_humidity"); humidity > 0.)
+            note(key + ".humidity_level", std::to_string(humidity_level(humidity)));
     }
     return changed;
 }
@@ -715,6 +721,40 @@ std::string CrealityPrintAgent::alternative_base_url(const std::string& base_url
     return moonraker_base_url(base_url);
 }
 
+int CrealityPrintAgent::humidity_level(double percent)
+{
+    return percent < 20. ? 5 : percent < 40. ? 4 : percent < 60. ? 3 : percent < 80. ? 2 : 1;
+}
+
+std::vector<json> CrealityPrintAgent::box_climates(const std::string& response)
+{
+    std::vector<json> climates;
+    const json        reply = json::parse(response, nullptr, false);
+    if (!reply.is_object() || !reply.contains("boxsInfo") || !reply["boxsInfo"].contains("materialBoxs"))
+        return climates;
+
+    for (const json& box : reply["boxsInfo"]["materialBoxs"]) {
+        if (safe_json_int(box, "state") != 1 || safe_json_int(box, "type") != 0)
+            continue; // what parse_cfs_response() does not count as a CFS
+
+        json climate = json::object();
+        if (const double humidity = json_number(box, "humidity"); humidity > 0.) {
+            climate["humidity"]     = std::to_string(humidity_level(humidity));
+            climate["humidity_raw"] = std::to_string(std::lround(humidity));
+        }
+        if (box.contains("temp"))
+            climate["temp"] = std::to_string(json_number(box, "temp"));
+        climates.push_back(std::move(climate));
+    }
+    return climates;
+}
+
+void CrealityPrintAgent::add_ams_unit_status(int ams_id, json& ams_unit) const
+{
+    if (ams_id >= 0 && ams_id < static_cast<int>(box_climate.size()))
+        ams_unit.update(box_climate[ams_id]);
+}
+
 void CrealityPrintAgent::report_box_config(const std::string& response)
 {
     auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
@@ -851,6 +891,7 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
 
     // A CFS is a four-slot box like the AMS, and the AMS view draws each spool's level, which
     // the AMS-Lite view the other Moonraker agents use does not.
+    box_climate = box_climates(response);
     build_ams_payload(box_count, max_slots - 1, trays, DevAmsType::AMS);
     if (loaded_slot)
         report_loaded_slot(*loaded_slot);

@@ -11,6 +11,8 @@
 #include "slic3r/GUI/DeviceCore/DevFilaSystem.h"
 #include "slic3r/GUI/DeviceCore/DevConfig.h"
 #include "slic3r/GUI/DeviceCore/DevManager.h"
+#include "slic3r/GUI/DeviceManager.hpp"
+#include "slic3r/Utils/NetworkAgentFactory.hpp"
 
 #include <wx/anybutton.h>
 #include <wx/colour.h>
@@ -94,6 +96,8 @@ bool AMSinfo::parse_ams_info(MachineObject *obj, DevAms *ams, bool remain_flag, 
     this->left_dray_time = ams->GetLeftDryTime();
     this->current_temperature = ams->GetCurrentTemperature();
     this->ams_type = AMSModel(ams->GetAmsType());
+    this->humidity_in_percent = this->ams_type == AMSModel::GENERIC_AMS && this->humidity_raw != -1 && obj &&
+                                !obj->printer_agent_id.empty() && obj->printer_agent_id != BBL_PRINTER_AGENT_ID;
 
     nozzle_id = ams->GetExtruderId();
     switch_pos = ams->GetSwitcherPos(); // Orca: carry the switch inlet for inlet-aware panel placement
@@ -2912,6 +2916,7 @@ AMSHumidity::AMSHumidity(wxWindow* parent, wxWindowID id, AMSinfo info, const wx
                 info->ams_type          = m_amsinfo.ams_type;
                 info->humidity_display_idx = m_amsinfo.get_humidity_display_idx();
                 info->humidity_percent  = m_amsinfo.humidity_raw;
+                info->humidity_in_percent = m_amsinfo.humidity_in_percent;
                 info->left_dry_time     = m_amsinfo.left_dray_time;
                 info->current_temperature = m_amsinfo.current_temperature;
                 show_event.SetClientData(info);
@@ -2942,7 +2947,7 @@ void AMSHumidity::UpdateInfo(AMSinfo amsinfo)
 void AMSHumidity::update_size()
 {
     wxSize size;
-    if (m_amsinfo.ams_type == AMSModel::GENERIC_AMS) {
+    if (m_amsinfo.ams_type == AMSModel::GENERIC_AMS && !m_amsinfo.humidity_in_percent) {
         size = AMS_HUMIDITY_NO_PERCENT_SIZE;
     } else {
         size = AMS_HUMIDITY_SIZE;
@@ -2999,7 +3004,7 @@ void AMSHumidity::doRender(wxDC& dc)
         dc.DrawRoundedRectangle(0, 0, (size.x), (size.y), (size.y / 2));
 
         wxPoint pot;
-        if (m_amsinfo.ams_type == AMSModel::GENERIC_AMS) /*image with stage*/
+        if (m_amsinfo.ams_type == AMSModel::GENERIC_AMS && !m_amsinfo.humidity_in_percent) /*image with stage*/
         {
             ScalableBitmap hum_img;
             if (!wxGetApp().dark_mode()) {

@@ -290,7 +290,7 @@ AMSControl::AMSControl(wxWindow *parent, wxWindowID id, const wxPoint &pos, cons
                 obj = dev->get_selected_machine();
             }
 
-            if (info->ams_type == AMSModel::GENERIC_AMS)
+            if (info->ams_type == AMSModel::GENERIC_AMS && !info->humidity_in_percent)
             {
                 wxPoint img_pos = ClientToScreen(wxPoint(0, 0));
                 wxPoint popup_pos(img_pos.x - m_Humidity_tip_popup.GetSize().GetWidth() + FromDIP(150), img_pos.y - FromDIP(80));

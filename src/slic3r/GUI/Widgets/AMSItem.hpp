@@ -242,6 +242,7 @@ public:
     int                     curreent_filamentstep;
     int                     ams_humidity = 0;
     int                     humidity_raw = -1;     // Orca: raw humidity percent (replaces REF ams_humidity_percent)
+    bool                    humidity_in_percent = false; // A four-slot AMS of another brand shows its reading, having no Bambu desiccant scale
     int                     left_dray_time = 0;
     float                   current_temperature = INVALID_AMS_TEMPERATURE;
     AMSModel                ams_type = AMSModel::GENERIC_AMS;
@@ -262,6 +263,7 @@ public:
             current_action == other.current_action &&
             curreent_filamentstep == other.curreent_filamentstep &&
             ams_humidity == other.ams_humidity &&
+            humidity_raw == other.humidity_raw &&
             left_dray_time == other.left_dray_time &&
             current_temperature == other.current_temperature &&
             ams_type == other.ams_type &&

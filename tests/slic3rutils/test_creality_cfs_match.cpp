@@ -673,3 +673,35 @@ TEST_CASE("The printer's web server is reached whichever address was saved", "[C
     CHECK(CrealityPrint::web_host("http://192.168.1.5/") == "http://192.168.1.5");
     CHECK(CrealityPrint::web_host("192.168.1.5:8080") == "192.168.1.5:8080");
 }
+
+TEST_CASE("A box's humidity falls in the level of its band", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::humidity_level(19.) == 5);
+    CHECK(CrealityPrintAgent::humidity_level(29.) == 4);
+    CHECK(CrealityPrintAgent::humidity_level(59.) == 3);
+    CHECK(CrealityPrintAgent::humidity_level(79.) == 2);
+    CHECK(CrealityPrintAgent::humidity_level(80.) == 1);
+}
+
+TEST_CASE("Each CFS box reports its temperature and humidity in AMS order", "[CFS][Creality]")
+{
+    const auto climates = CrealityPrintAgent::box_climates(R"({"boxsInfo":{"materialBoxs":[
+        {"id":0,"state":0,"type":1},
+        {"id":1,"state":1,"type":0,"temp":26.0,"humidity":29.0},
+        {"id":2,"state":1,"type":0,"temp":25.0,"humidity":0}]}})");
+    REQUIRE(climates.size() == 2);
+    CHECK(climates[0]["humidity"] == "4");
+    CHECK(climates[0]["humidity_raw"] == "29");
+    CHECK(std::stof(climates[0]["temp"].get<std::string>()) == 26.f);
+    CHECK_FALSE(climates[1].contains("humidity"));
+    CHECK_FALSE(climates[1].contains("humidity_raw"));
+}
+
+TEST_CASE("A K1 box update asks for the slots only when its humidity changes level", "[CFS][Creality]")
+{
+    std::map<std::string, std::string> seen;
+    CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"dry_and_humidity":"29"}})"), seen);
+    CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"dry_and_humidity":"30"}})"), seen));
+    CHECK(CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T1":{"dry_and_humidity":"41"}})"), seen));
+    CHECK_FALSE(CrealityPrintAgent::box_update_changes_slots(nlohmann::json::parse(R"({"T2":{"dry_and_humidity":"None"}})"), seen));
+}
