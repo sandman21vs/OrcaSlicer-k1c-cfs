@@ -169,6 +169,8 @@ protected:
                            DevAmsType ams_type = DevAmsType::AMS_LITE);
     // Name shown for a filament unit, or empty for the AMS Lite name
     virtual std::string ams_unit_name(int /*ams_id*/) const { return {}; }
+    // Another URL to try when Moonraker does not answer at `base_url`, or empty for none
+    virtual std::string alternative_base_url(const std::string& /*base_url*/) const { return {}; }
     // A slot reported its filament level, so status reports keep the level display on
     std::atomic<bool> reports_filament_level{false};
 
@@ -280,7 +282,7 @@ private:
 
     // Connection thread management
     void perform_connection_async(const std::string& dev_id,
-                                   const std::string& base_url,
+                                   std::string        base_url,
                                    const std::string& api_key,
                                    uint64_t generation);
 

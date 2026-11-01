@@ -36,6 +36,13 @@ public:
     bool supports_multi_color_print() const;
     bool is_k1_family_board() const;
 
+    // Moonraker's port on boards whose web server does not forward to it.
+    static constexpr const char* moonraker_port = "7125";
+    // The address of the printer's web server, which this class talks to. The Moonraker connection
+    // saves the same printer with Moonraker's port.
+    static std::string web_host(std::string host);
+
+
     // Single source of truth for the CFS-capable model table, shared with
     // LAN discovery (CrealityHostDiscovery). Model is the /info "model"
     // value: an F-code on the K2 platform, a literal name on K1-family.

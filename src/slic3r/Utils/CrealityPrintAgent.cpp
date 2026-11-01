@@ -698,6 +698,23 @@ void CrealityPrintAgent::report_printer_message(std::string message)
     });
 }
 
+std::string CrealityPrintAgent::moonraker_base_url(const std::string& base_url)
+{
+    const size_t scheme = base_url.find("://");
+    if (base_url.find(':', scheme == std::string::npos ? 0 : scheme + 3) != std::string::npos)
+        return {};
+
+    std::string url = base_url;
+    while (!url.empty() && url.back() == '/')
+        url.pop_back();
+    return url + ":" + CrealityPrint::moonraker_port;
+}
+
+std::string CrealityPrintAgent::alternative_base_url(const std::string& base_url) const
+{
+    return moonraker_base_url(base_url);
+}
+
 void CrealityPrintAgent::report_box_config(const std::string& response)
 {
     auto*          dev_manager = GUI::wxGetApp().getDeviceManager();

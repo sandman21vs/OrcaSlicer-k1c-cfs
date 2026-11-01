@@ -1,6 +1,7 @@
 #include "CrealityPrint.hpp"
 
 #include <algorithm>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/beast/websocket/stream.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
@@ -193,15 +194,20 @@ bool CrealityPrint::upload(PrintHostUpload upload_data, ProgressFn prorgess_fn, 
 
 std::string CrealityPrint::make_url(const std::string &path) const
 {
-    if (m_host.find("http://") == 0 || m_host.find("https://") == 0) {
-        if (m_host.back() == '/') {
-            return (boost::format("%1%%2%") % m_host % path).str();
-        } else {
-            return (boost::format("%1%/%2%") % m_host % path).str();
-        }
-    } else {
-        return (boost::format("http://%1%/%2%") % m_host % path).str();
-    }
+    const std::string host = web_host(m_host);
+    if (host.find("http://") == 0 || host.find("https://") == 0)
+        return (boost::format("%1%/%2%") % host % path).str();
+    return (boost::format("http://%1%/%2%") % host % path).str();
+}
+
+std::string CrealityPrint::web_host(std::string host)
+{
+    while (!host.empty() && host.back() == '/')
+        host.pop_back();
+    const std::string port = std::string(":") + moonraker_port;
+    if (boost::ends_with(host, port))
+        host.resize(host.size() - port.size());
+    return host;
 }
 
 std::string CrealityPrint::safe_filename(const std::string &filename) const

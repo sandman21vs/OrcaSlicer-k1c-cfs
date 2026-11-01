@@ -11,6 +11,7 @@
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/Utils/CrealityCfs.hpp"
+#include "slic3r/Utils/CrealityPrint.hpp"
 #include "slic3r/Utils/CrealityPrintAgent.hpp"
 
 #include <nlohmann/json.hpp>
@@ -655,4 +656,20 @@ TEST_CASE("An enabled preset of the spool's type wins over one that is not enabl
         {"Hyper PETG-CF @K1C",      "PETG-CF-HYPER", "PETG-CF", false, true, /*is_hidden=*/true},
     };
     CHECK(match(specs, "eSUN", "", "PETG-CF") == "PETG-CF-GENERIC");
+}
+
+TEST_CASE("Moonraker is tried on its own port when the address names none", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::moonraker_base_url("http://192.168.1.5") == "http://192.168.1.5:7125");
+    CHECK(CrealityPrintAgent::moonraker_base_url("http://192.168.1.5/") == "http://192.168.1.5:7125");
+    CHECK(CrealityPrintAgent::moonraker_base_url("http://192.168.1.5:7125").empty());
+    CHECK(CrealityPrintAgent::moonraker_base_url("http://192.168.1.5:4408").empty());
+}
+
+TEST_CASE("The printer's web server is reached whichever address was saved", "[CFS][Creality]")
+{
+    CHECK(CrealityPrint::web_host("192.168.1.5:7125") == "192.168.1.5");
+    CHECK(CrealityPrint::web_host("http://192.168.1.5:7125/") == "http://192.168.1.5");
+    CHECK(CrealityPrint::web_host("http://192.168.1.5/") == "http://192.168.1.5");
+    CHECK(CrealityPrint::web_host("192.168.1.5:8080") == "192.168.1.5:8080");
 }

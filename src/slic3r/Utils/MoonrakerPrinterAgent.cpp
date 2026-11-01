@@ -2507,7 +2507,7 @@ bool MoonrakerPrinterAgent::send_jsonrpc_command(const std::string&    base_url,
     return success;
 }
 
-void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, const std::string& base_url, const std::string& api_key, uint64_t generation)
+void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, std::string base_url, const std::string& api_key, uint64_t generation)
 {
     auto is_stale = [&]() { return generation != connect_generation.load(); };
 
@@ -2524,7 +2524,18 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
         // may still be starting, and on macOS the first attempt has been seen refused while the app's Local Network
         // access is checked
         MoonrakerDeviceInfo fetched_info;
-        for (int attempt = 0; !fetch_device_info(base_url, api_key, fetched_info, error_msg, is_stale); ++attempt) {
+        const auto          reach_moonraker = [&] {
+            if (fetch_device_info(base_url, api_key, fetched_info, error_msg, is_stale)) {
+                return true;
+            }
+            const std::string alternative = alternative_base_url(base_url);
+            if (alternative.empty() || is_stale() || !fetch_device_info(alternative, api_key, fetched_info, error_msg, is_stale)) {
+                return false;
+            }
+            base_url = alternative;
+            return true;
+        };
+        for (int attempt = 0; !reach_moonraker(); ++attempt) {
             if (is_stale()) {
                 return;
             }
@@ -2547,6 +2558,7 @@ void MoonrakerPrinterAgent::perform_connection_async(const std::string& dev_id, 
             if (is_stale()) {
                 return;
             }
+            device_info.base_url     = base_url;
             device_info.dev_name     = fetched_info.dev_name.empty() ? dev_id : fetched_info.dev_name;
             device_info.version      = fetched_info.version;
             device_info.klippy_state = fetched_info.klippy_state;
