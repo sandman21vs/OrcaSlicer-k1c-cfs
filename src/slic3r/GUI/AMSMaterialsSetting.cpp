@@ -38,6 +38,7 @@
 #include "slic3r/GUI/DeviceCore/DevConfigUtil.h"
 #include <cstddef>
 #include <climits>
+#include "slic3r/Utils/NetworkAgentFactory.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include <cmath>
 #include "slic3r/GUI/Widgets/PopupWindow.hpp"
@@ -914,6 +915,13 @@ void AMSMaterialsSetting::on_select_ok(wxCommandEvent &event)
             tray->ctype = tray_ctype;
             tray->set_hold_count();
         }
+    }
+
+    // Pressure advance is a Bambu command, and its row is hidden for other printers: there is no K to
+    // check or send, and the row's 0 would be refused as invalid.
+    if (!obj->printer_agent_id.empty() && obj->printer_agent_id != BBL_PRINTER_AGENT_ID && !m_panel_kn->IsShown()) {
+        Close();
+        return;
     }
 
     //reset param
