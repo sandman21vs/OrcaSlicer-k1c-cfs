@@ -189,7 +189,8 @@ const Preset* find_filament_preset(const PresetCollection& filaments, const std:
 //   can collapse a brand-specific match back to "Generic PLA" via the inherited id.
 // Requires the preset's declared filament_type to equal the spool's base type
 // (PLA/PETG/ABS/...) so we never auto-pick a PETG preset for a PLA spool.
-// Falls back to a visible system base of the same type when nothing scores.
+// Falls back to a visible system base of the same type when nothing scores, then to a system
+// preset that is not enabled.
 std::string CrealityPrintAgent::match_filament_preset(const PresetCollection& filaments,
                                                       const std::string&      vendor,
                                                       const std::string&      brand_name,
@@ -215,40 +216,44 @@ std::string CrealityPrintAgent::match_filament_preset(const PresetCollection& fi
     };
     std::vector<Match> matches;
 
-    int considered = 0;
-    for (const auto& p : filaments.get_presets()) {
-        if (!p.is_visible || !p.is_compatible) continue;
-        // Note: we deliberately do NOT filter on get_preset_base(p) == &p.
-        // K2 owners frequently keep tweaked copies of system presets
-        // (e.g. "Creality Hyper PLA @K2 (Harky)" with their per-spool PA),
-        // which are derived presets — filtering to bases-only would skip
-        // exactly the presets users care about most.
-        ++considered;
+    int        considered    = 0;
+    const auto score_presets = [&](bool visible) {
+        for (const auto& p : filaments.get_presets()) {
+            if (p.is_visible != visible || !p.is_compatible) continue;
+            if (!visible && !p.is_system) continue;
+            // Note: we deliberately do NOT filter on get_preset_base(p) == &p.
+            // K2 owners frequently keep tweaked copies of system presets
+            // (e.g. "Creality Hyper PLA @K2 (Harky)" with their per-spool PA),
+            // which are derived presets — filtering to bases-only would skip
+            // exactly the presets users care about most.
+            ++considered;
 
-        std::string preset_type;
-        if (const auto* ft = p.config.option<ConfigOptionStrings>("filament_type"))
-            if (!ft->values.empty()) preset_type = ft->values.front();
-        if (to_lower(preset_type) != type_lower) continue;
+            std::string preset_type;
+            if (const auto* ft = p.config.option<ConfigOptionStrings>("filament_type"))
+                if (!ft->values.empty()) preset_type = ft->values.front();
+            if (to_lower(preset_type) != type_lower) continue;
 
-        const std::string name_lower = to_lower(p.name);
-        int score = 0;
-        if (!brand_lower.empty() && name_lower.find(brand_lower) != std::string::npos)
-            score += 20;
-        // Profile OR name - neither alone covers both the vendor's own generics and the
-        // third party filaments shipped inside its bundle. See the header comment.
-        if (!vendor_lower.empty()
-            && ((p.vendor != nullptr && to_lower(p.vendor->name) == vendor_lower)
-                || name_lower.find(vendor_lower) != std::string::npos))
-            score += 10;
+            const std::string name_lower = to_lower(p.name);
+            int score = 0;
+            if (!brand_lower.empty() && name_lower.find(brand_lower) != std::string::npos)
+                score += 20;
+            // Profile OR name - neither alone covers both the vendor's own generics and the
+            // third party filaments shipped inside its bundle. See the header comment.
+            if (!vendor_lower.empty()
+                && ((p.vendor != nullptr && to_lower(p.vendor->name) == vendor_lower)
+                    || name_lower.find(vendor_lower) != std::string::npos))
+                score += 10;
 
-        if (score == 0) continue;
+            if (score == 0) continue;
 
-        for (const auto& w : name_words(p.name))
-            if (spool_words.count(w) == 0)
-                score -= 5;
+            for (const auto& w : name_words(p.name))
+                if (spool_words.count(w) == 0)
+                    score -= 5;
 
-        matches.push_back({&p, score, !p.is_system && !p.is_default});
-    }
+            matches.push_back({&p, score, !p.is_system && !p.is_default});
+        }
+    };
+    score_presets(/*visible=*/true);
 
     if (matches.empty()) {
         // first_visible_idx_by_type() returns any visible preset when no base of this
@@ -261,8 +266,15 @@ std::string CrealityPrintAgent::match_filament_preset(const PresetCollection& fi
             << "CrealityPrintAgent: no preset scored for spool {" << vendor << " "
             << brand_name << " (" << base_type << ")} after considering " << considered
             << " presets; falling back to generic preset id \"" << fallback << "\""
-            << (fallback_ok ? "" : " (no visible base of this type; returning empty)");
-        return fallback_ok ? fallback : std::string();
+            << (fallback_ok ? "" : " (no visible base of this type)");
+        if (fallback_ok)
+            return fallback;
+
+        // The spool's own preset may ship with the printer without being enabled, and the AMS
+        // sync finds a preset by its filament_id whether it is enabled or not.
+        score_presets(/*visible=*/false);
+        if (matches.empty())
+            return {};
     }
 
     std::sort(matches.begin(), matches.end(),

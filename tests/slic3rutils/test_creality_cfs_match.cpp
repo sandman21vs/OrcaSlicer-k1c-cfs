@@ -36,6 +36,7 @@ struct FilamentSpec
     const char *filament_type;
     bool        is_library = false;   // belongs to the Orca Filament Library, not the printer vendor
     bool        is_system  = true;
+    bool        is_hidden  = false;   // shipped with the printer's profiles but not enabled
 };
 
 // Load the specs into the collection, then stamp the fields the matcher reads. Done in a second
@@ -58,7 +59,7 @@ void populate(PresetCollection &filaments, const std::vector<FilamentSpec> &spec
         it->vendor       = spec->is_library ? &library : &vendor;
         it->is_system    = spec->is_system;
         it->is_default   = false;
-        it->is_visible   = true;
+        it->is_visible   = !spec->is_hidden;
         it->is_compatible = true;
     }
 }
@@ -635,4 +636,23 @@ TEST_CASE("Console lines that are not errors show nothing", "[CFS][Creality]")
     CHECK(CrealityPrintAgent::printer_error_text(R"(!! {"code":"key61, "msg":"Unknown command:SET_HOTEND_FAN", "values": ["SET_HOTEND_FAN VALUE=1"]})").empty());
     CHECK(CrealityPrintAgent::printer_error_text("// Extruder not hot enough").empty());
     CHECK(CrealityPrintAgent::printer_error_text("!!").empty());
+}
+
+TEST_CASE("A spool's preset is found when it ships with the printer but is not enabled", "[CFS][Creality]")
+{
+    const std::vector<FilamentSpec> specs{
+        {"Generic PLA @K1C",     "PLA-GENERIC", "PLA"},
+        {"Hyper PETG-CF @K1C",   "PETG-CF-HYPER", "PETG-CF", false, true, /*is_hidden=*/true},
+        {"Generic PETG-CF @K1C", "PETG-CF-GENERIC", "PETG-CF", false, true, /*is_hidden=*/true},
+    };
+    CHECK(match(specs, "Creality", "Hyper PETG-CF", "PETG-CF") == "PETG-CF-HYPER");
+}
+
+TEST_CASE("An enabled preset of the spool's type wins over one that is not enabled", "[CFS][Creality]")
+{
+    const std::vector<FilamentSpec> specs{
+        {"Generic PETG-CF @System", "PETG-CF-GENERIC", "PETG-CF", /*is_library=*/true},
+        {"Hyper PETG-CF @K1C",      "PETG-CF-HYPER", "PETG-CF", false, true, /*is_hidden=*/true},
+    };
+    CHECK(match(specs, "eSUN", "", "PETG-CF") == "PETG-CF-GENERIC");
 }
