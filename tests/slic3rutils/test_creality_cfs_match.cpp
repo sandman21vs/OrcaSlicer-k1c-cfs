@@ -603,3 +603,22 @@ TEST_CASE("The device page's CFS settings map onto the box config", "[CFS][Creal
     CHECK(CrealityPrintAgent::box_config_fields({{"command", "print_option"}, {"sound_enable", true}}).empty());
     CHECK(CrealityPrintAgent::box_config_fields({{"command", "ams_change_filament"}}).empty());
 }
+
+TEST_CASE("A slot from the box object is named from the printer's material library", "[CFS][Creality]")
+{
+    const std::string library = R"({"retMaterials":[
+        {"base":{"id":"00014","brand":"Generic","name":"Generic PETG-CF","meterialType":"PETG-CF"}},
+        {"base":{"id":"06003","brand":"Creality","name":"Hyper PETG-CF","meterialType":"PETG-CF"}}]})";
+    std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(0, 1, 0, "PLA", "#fa7c0c")};
+    slots[0].vendor = "eSUN";
+    CrealityPrintAgent::add_slots_from_box_object(k1c_box_response, slots);
+
+    CrealityPrintAgent::name_slots_from_library(library, slots);
+
+    REQUIRE(slots.size() == 3);
+    CHECK(slots[0].vendor == "eSUN");
+    CHECK(slots[0].brand_name.empty());
+    CHECK(slots[1].vendor.empty()); // code 101001 is not in this library
+    CHECK(slots[2].vendor == "Creality");
+    CHECK(slots[2].brand_name == "Hyper PETG-CF");
+}

@@ -456,8 +456,29 @@ void CrealityPrintAgent::add_slots_from_box_object(const std::string& box_respon
             slot.printer_box_id = slot.box_id + 1;
             slot.slot_id        = index % 4;
             slot.filament_type  = material[3].get<std::string>();
+            slot.material_code  = material[0].is_string() ? material[0].get<std::string>() : std::string();
             slot.color_hex      = "#" + (color.size() == 7 ? color.substr(1) : color);
             slots.push_back(std::move(slot));
+        }
+    }
+}
+
+void CrealityPrintAgent::name_slots_from_library(const std::string& library_response, std::vector<CFSSlot>& slots)
+{
+    const json resp = json::parse(library_response, nullptr, false);
+    if (resp.is_discarded() || !resp.contains("retMaterials") || !resp["retMaterials"].is_array())
+        return;
+
+    for (CFSSlot& slot : slots) {
+        if (!slot.vendor.empty() || slot.material_code.size() != 6)
+            continue;
+        const std::string id = slot.material_code.substr(1);
+        for (const auto& entry : resp["retMaterials"]) {
+            if (!entry.is_object() || !entry.contains("base") || !entry["base"].is_object() || json_string(entry["base"], "id") != id)
+                continue;
+            slot.vendor     = json_string(entry["base"], "brand");
+            slot.brand_name = json_string(entry["base"], "name");
+            break;
         }
     }
 }
@@ -709,6 +730,11 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
     }
 
     add_slots_from_box_object(box_response, slots);
+    if (std::any_of(slots.begin(), slots.end(), [](const CFSSlot& s) { return s.vendor.empty() && !s.material_code.empty(); })) {
+        if (material_library.empty())
+            material_library = host.query_material_library();
+        name_slots_from_library(material_library, slots);
+    }
 
     BOOST_LOG_TRIVIAL(info)
         << "CrealityPrintAgent: " << box_count << " CFS box(es), "

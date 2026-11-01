@@ -47,6 +47,7 @@ public:
         std::string brand_name;    // "Hyper PLA", ... or ""
         std::string vendor;        // "Creality", "eSUN", or "" if unknown
         int         remain = -1;   // Filament left on the spool, 0..100; -1 when the box does not report it
+        std::string material_code; // The box object's material code ("106003"), for a slot read from there
     };
 
     // A slot record to write back. All fields empty clears the slot.
@@ -121,6 +122,9 @@ public:
     // the spool from the tag it read. Adds to `slots` each one that the Klipper `box` object lists in
     // `same_material`, which drops a slot as soon as its spool runs out.
     static void add_slots_from_box_object(const std::string& box_response, std::vector<CFSSlot>& slots);
+    // Names those slots from the printer's material library (the retMaterials answer to
+    // reqMaterials), whose ids are the material code without its first digit.
+    static void name_slots_from_library(const std::string& library_response, std::vector<CFSSlot>& slots);
 
     // Strip PLA/PETG/... subtype suffixes ("PLA Silk", "PLA+", "ABS Pro") to base
     // type so the preset_bundle->filaments.filament_id_by_type() lookup succeeds.
@@ -179,6 +183,8 @@ private:
     std::atomic<bool> can_command_box{false};
     // Touched only by the status stream's thread.
     std::map<std::string, std::string> seen_box_fields;
+    // The printer's material library, kept once a slot has needed it. Touched only on the main thread.
+    std::string material_library;
 };
 
 } // namespace Slic3r
