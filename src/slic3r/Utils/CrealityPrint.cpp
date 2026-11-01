@@ -418,6 +418,15 @@ std::string CrealityPrint::query_boxes_info() const
     return ws_query({{"boxsInfo", 1}}, "boxsInfo");
 }
 
+std::string CrealityPrint::query_printer_status() const
+{
+    // Short deadlines, since this is asked again and again and closing the app waits for it
+    CrealityPrint quick(*this);
+    quick.ws_settings.connect = std::chrono::seconds(2);
+    quick.ws_settings.reply   = std::chrono::seconds(3);
+    return quick.ws_query({{"boxConfig", 1}}, "\"err\"");
+}
+
 std::string CrealityPrint::query_material_library() const
 {
     return ws_query({{"reqMaterials", 1}}, "retMaterials");

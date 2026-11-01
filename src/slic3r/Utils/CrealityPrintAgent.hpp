@@ -8,10 +8,13 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace Slic3r {
@@ -66,7 +69,7 @@ public:
     };
 
     explicit CrealityPrintAgent(std::string log_dir);
-    ~CrealityPrintAgent() override = default;
+    ~CrealityPrintAgent() override;
 
     static AgentInfo get_agent_info_static();
     AgentInfo        get_agent_info() override { return get_agent_info_static(); }
@@ -115,6 +118,10 @@ public:
     // shown on its screen, or an empty string for any other line. Stock macros call a command
     // rooted firmware lacks on every print, so "Unknown command" (key61) is left out.
     static std::string printer_error_text(const std::string& line);
+
+    // The notice number in a printer status report (see CrealityPrint::query_printer_status()), 0
+    // when its screen shows none and -1 for a reply that does not say.
+    static int printer_notice(const std::string& response);
 
     // The Moonraker URL to try beside one that names no port, or empty when it names one.
     static std::string moonraker_base_url(const std::string& base_url);
@@ -180,6 +187,7 @@ public:
 
 protected:
     void on_printer_connected(const std::string& dev_id) override;
+    int  disconnect_printer() override;
     void add_ams_unit_status(int ams_id, nlohmann::json& ams_unit) const override;
     std::string alternative_base_url(const std::string& base_url) const override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
@@ -193,6 +201,11 @@ private:
     void report_loaded_slot(int loaded_slot);
     // Shows `message` on the device page's print progress, or clears it when empty.
     void report_printer_message(std::string message);
+    // Shows notice `key` on the print progress, or clears notice `previous_key` when `key` is 0.
+    void report_printer_notice(int key, int previous_key);
+    // Until the agent is destroyed, asks a K1-family printer for the notice on its screen. Moonraker
+    // does not carry those notices, and port 9999 is only read when something asks it.
+    void watch_printers();
     // Tells the device page how the box reads tags, from a boxConfig answer.
     void report_box_config(const std::string& response);
     int  set_cfs_slot(const nlohmann::json& print_cmd);
@@ -206,6 +219,13 @@ private:
     std::string material_library;
     // What the last slot read found for each box, in AMS order.
     std::vector<nlohmann::json> box_climate;
+
+    std::thread             watch_thread;
+    std::mutex              watch_mutex;
+    std::condition_variable watch_wake;
+    bool                    watch_stop = false;
+    std::string             notice_ip;  // Empty while no printer is connected
+    std::string             notice_api_key;
 };
 
 } // namespace Slic3r

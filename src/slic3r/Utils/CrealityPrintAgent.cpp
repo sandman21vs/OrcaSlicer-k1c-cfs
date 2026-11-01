@@ -8,6 +8,7 @@
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/I18N.hpp"
+#include "slic3r/GUI/format.hpp"
 #include "slic3r/GUI/DeviceCore/DevDefs.h"
 #include "slic3r/GUI/DeviceManager.hpp"
 #include "slic3r/GUI/DeviceCore/DevExtruderSystem.h"
@@ -29,6 +30,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -292,6 +294,17 @@ std::string CrealityPrintAgent::match_filament_preset(const PresetCollection& fi
         << ", " << matches.size() << " candidate(s) of " << considered << " considered)";
 
     return matches.front().preset->filament_id;
+}
+
+CrealityPrintAgent::~CrealityPrintAgent()
+{
+    {
+        std::lock_guard<std::mutex> lock(watch_mutex);
+        watch_stop = true;
+    }
+    watch_wake.notify_all();
+    if (watch_thread.joinable())
+        watch_thread.join();
 }
 
 CrealityPrintAgent::CrealityPrintAgent(std::string log_dir)
@@ -704,6 +717,53 @@ void CrealityPrintAgent::report_printer_message(std::string message)
     });
 }
 
+int CrealityPrintAgent::printer_notice(const std::string& response)
+{
+    const json status = json::parse(response, nullptr, false);
+    if (!status.is_object() || !status.contains("err") || !status["err"].is_object())
+        return -1;
+    return static_cast<int>(json_number(status["err"], "key"));
+}
+
+void CrealityPrintAgent::report_printer_notice(int key, int previous_key)
+{
+    run_on_main([this, key, previous_key] {
+        // TRN The printer's firmware numbers the notices on its touch screen. %1% is that number.
+        const auto text = [](int notice) { return GUI::format(_u8L("The printer shows notice %1% on its screen."), notice); };
+
+        auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
+        MachineObject* obj         = dev_manager ? dev_manager->get_my_machine(device_info.dev_id) : nullptr;
+        if (!obj)
+            return;
+        if (key != 0)
+            obj->printer_message = text(key);
+        else if (previous_key != 0 && obj->printer_message == text(previous_key))
+            obj->printer_message.clear();
+    });
+}
+
+void CrealityPrintAgent::watch_printers()
+{
+    constexpr auto interval = std::chrono::seconds(20);
+
+    int                          shown_key = 0;
+    std::unique_lock<std::mutex> lock(watch_mutex);
+    while (!watch_stop) {
+        watch_wake.wait_for(lock, interval, [this] { return watch_stop; });
+        if (watch_stop || notice_ip.empty() || !can_command_box)
+            continue;
+
+        const CrealityPrint host = make_host(notice_ip, notice_api_key);
+        lock.unlock();
+        const int key = printer_notice(host.query_printer_status());
+        if (key >= 0 && key != shown_key) {
+            report_printer_notice(key, shown_key);
+            shown_key = key;
+        }
+        lock.lock();
+    }
+}
+
 std::string CrealityPrintAgent::moonraker_base_url(const std::string& base_url)
 {
     const size_t scheme = base_url.find("://");
@@ -782,6 +842,21 @@ void CrealityPrintAgent::on_printer_connected(const std::string& dev_id)
 {
     // The device page shows the slots, and Load and Unload need them, without a sync from the sidebar.
     fetch_filament_info_on_main(dev_id);
+
+    std::lock_guard<std::mutex> lock(watch_mutex);
+    notice_ip      = device_info.dev_ip;
+    notice_api_key = device_info.api_key;
+    if (!watch_thread.joinable() && !watch_stop)
+        watch_thread = std::thread([this] { watch_printers(); });
+}
+
+int CrealityPrintAgent::disconnect_printer()
+{
+    {
+        std::lock_guard<std::mutex> lock(watch_mutex);
+        notice_ip.clear();
+    }
+    return MoonrakerPrinterAgent::disconnect_printer();
 }
 
 bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)

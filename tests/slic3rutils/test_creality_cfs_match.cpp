@@ -658,6 +658,14 @@ TEST_CASE("An enabled preset of the spool's type wins over one that is not enabl
     CHECK(match(specs, "eSUN", "", "PETG-CF") == "PETG-CF-GENERIC");
 }
 
+TEST_CASE("The notice on a printer's screen comes from its status report", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::printer_notice(R"({"err":{"errcode":500,"key":2069},"nozzleTemp":"26"})") == 2069);
+    CHECK(CrealityPrintAgent::printer_notice(R"({"err":{"errcode":0,"key":0}})") == 0);
+    CHECK(CrealityPrintAgent::printer_notice(R"({"nozzleTemp":"26"})") == -1);
+    CHECK(CrealityPrintAgent::printer_notice("") == -1);
+}
+
 TEST_CASE("Moonraker is tried on its own port when the address names none", "[CFS][Creality]")
 {
     CHECK(CrealityPrintAgent::moonraker_base_url("http://192.168.1.5") == "http://192.168.1.5:7125");

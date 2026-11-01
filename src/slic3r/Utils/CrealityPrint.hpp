@@ -53,6 +53,8 @@ public:
     static bool model_supports_cfs_write(const std::string& model);
     bool        supports_cfs_write() const;
     std::string query_boxes_info() const;
+    // The printer's status report, sent on every new connection, whose `err` field is the notice on its screen.
+    std::string query_printer_status() const;
     // The printer's material library: the "retMaterials" answer to reqMaterials.
     std::string query_material_library() const;
     // Write one CFS slot record (the "modifyMaterial" set command Creality Print sends).

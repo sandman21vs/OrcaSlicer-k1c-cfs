@@ -281,6 +281,7 @@ src/slic3r/Utils/SimplyPrint.cpp
 src/slic3r/Utils/Flashforge.cpp
 src/slic3r/Utils/ElegooLink.cpp
 src/slic3r/Utils/CrealityPrint.cpp
+src/slic3r/Utils/CrealityPrintAgent.cpp
 src/slic3r/Utils/PrintHost.cpp
 src/slic3r/GUI/Jobs/OAuthJob.cpp
 src/slic3r/GUI/Gizmos/GLGizmoBrimEars.cpp
