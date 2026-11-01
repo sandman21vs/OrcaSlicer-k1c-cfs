@@ -137,6 +137,8 @@
 #include "slic3r/Utils/NetworkAgent.hpp"
 #include "slic3r/Utils/NetworkAgentFactory.hpp"
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/path.hpp>
 
 using json = nlohmann::json;
 
@@ -7108,6 +7110,24 @@ static wxString _get_tips(MachineObject* obj_)
     return tips;
 }
 
+// The image of a printer in the list. The previews in images/ are all Bambu's, so a printer reached
+// through another agent shows the cover its vendor profile ships.
+static std::string printer_preview_image(const MachineObject* obj)
+{
+    if (!obj->printer_agent_id.empty() && obj->printer_agent_id != BBL_PRINTER_AGENT_ID) {
+        for (const auto& [vendor_id, vendor] : wxGetApp().preset_bundle->vendors) {
+            for (const auto& model : vendor.models) {
+                if (model.model_id != obj->printer_type)
+                    continue;
+                fs::path cover = fs::path(resources_dir()) / "profiles" / vendor_id / (model.name + "_cover.png");
+                if (fs::exists(cover))
+                    return cover.make_preferred().string();
+            }
+        }
+    }
+    return "printer_preview_" + obj->printer_type;
+}
+
 void PrinterInfoBox::SetPrinters(const std::vector<MachineObject*>& sorted_printers)
 {
     m_comboBox_printer->Clear();
@@ -7122,8 +7142,9 @@ void PrinterInfoBox::SetPrinters(const std::vector<MachineObject*>& sorted_print
         // update image
         try
         {
-            drop_item.icon = create_scaled_bitmap("printer_preview_" + obj->printer_type, this, 32);
-            drop_item.icon_textctrl = create_scaled_bitmap("printer_preview_" + obj->printer_type, this, 52);
+            const std::string image = printer_preview_image(obj);
+            drop_item.icon           = create_scaled_bitmap(image, this, 32);
+            drop_item.icon_textctrl  = create_scaled_bitmap(image, this, 52);
         }
         catch (const std::exception&)
         {
