@@ -444,7 +444,12 @@ bool CrealityPrint::modify_material(const json& material) const
     return true;
 }
 
-bool CrealityPrint::set_auto_refill(bool enabled) const
+std::string CrealityPrint::query_box_config() const
+{
+    return ws_query({{"boxConfig", 1}}, "boxConfig");
+}
+
+bool CrealityPrint::set_box_config(const json& fields) const
 {
     try {
         net::io_context ioc;
@@ -452,14 +457,13 @@ bool CrealityPrint::set_auto_refill(bool enabled) const
         ws_connect(ioc, ws, m_host, ws_settings.port, ws_settings.connect);
 
         beast::get_lowest_layer(ws).expires_after(ws_settings.reply);
-        // The box keeps the fields a command leaves out, and answers with all of them.
-        json cmd = {{"method", "set"}, {"params", {{"boxConfig", {{"autoRefill", enabled ? 1 : 0}}}}}};
+        json cmd = {{"method", "set"}, {"params", {{"boxConfig", fields}}}};
         const std::string reply = ws_send_and_read(ioc, ws, cmd, "boxConfig");
 
         ws_close(ioc, ws, ws_settings.close);
         return !reply.empty();
     } catch (std::exception const& e) {
-        BOOST_LOG_TRIVIAL(error) << "CrealityPrint: Failed to set Auto Refill: " << e.what();
+        BOOST_LOG_TRIVIAL(error) << "CrealityPrint: Failed to set boxConfig: " << e.what();
         return false;
     }
 }

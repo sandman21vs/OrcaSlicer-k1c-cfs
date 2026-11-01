@@ -11,6 +11,8 @@
 #include "slic3r/GUI/DeviceCore/DevDefs.h"
 #include "slic3r/GUI/DeviceManager.hpp"
 #include "slic3r/GUI/DeviceCore/DevExtruderSystem.h"
+#include "slic3r/GUI/DeviceCore/DevFilaAmsSetting.h"
+#include "slic3r/GUI/DeviceCore/DevFilaSystem.h"
 #include "slic3r/GUI/DeviceCore/DevManager.h"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -602,6 +604,41 @@ bool CrealityPrintAgent::print_uploaded_file(const PrintParams& params, const st
     return true;
 }
 
+json CrealityPrintAgent::box_config_fields(const json& print_cmd)
+{
+    json fields = json::object();
+    if (!print_cmd.is_object())
+        return fields;
+
+    const std::string command = json_string(print_cmd, "command");
+    const auto        copy    = [&](const char* from, const char* to) {
+        if (const auto it = print_cmd.find(from); it != print_cmd.end() && it->is_boolean())
+            fields[to] = it->get<bool>() ? 1 : 0;
+    };
+    if (command == "print_option") {
+        copy("auto_switch_filament", "autoRefill");
+    } else if (command == "ams_user_setting") {
+        copy("tray_read_option", "cAutoFeed");
+        copy("startup_read_option", "cSelfTest");
+    }
+    return fields;
+}
+
+void CrealityPrintAgent::report_box_config(const std::string& response)
+{
+    auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
+    MachineObject* obj         = dev_manager ? dev_manager->get_my_machine(device_info.dev_id) : nullptr;
+    const json     reply       = json::parse(response, nullptr, false);
+    if (!obj || reply.is_discarded() || !reply.contains("boxConfig") || !reply["boxConfig"].is_object())
+        return;
+
+    const json& config = reply["boxConfig"];
+    if (config.contains("cAutoFeed"))
+        obj->GetFilaSystem()->GetAmsSystemSetting().SetDetectOnInsertEnabled(json_number(config, "cAutoFeed") != 0.);
+    if (config.contains("cSelfTest"))
+        obj->GetFilaSystem()->GetAmsSystemSetting().SetDetectOnPowerupEnabled(json_number(config, "cSelfTest") != 0.);
+}
+
 void CrealityPrintAgent::report_loaded_slot(int loaded_slot)
 {
     auto*          dev_manager = GUI::wxGetApp().getDeviceManager();
@@ -721,6 +758,8 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
     build_ams_payload(box_count, max_slots - 1, trays, DevAmsType::AMS);
     if (loaded_slot)
         report_loaded_slot(*loaded_slot);
+    if (can_command_box)
+        report_box_config(host.query_box_config());
     return true;
 }
 
@@ -901,13 +940,12 @@ int CrealityPrintAgent::send_message_to_printer(std::string dev_id, std::string 
     if (is_ams_filament_setting(j))
         return set_cfs_slot(j["print"]);
 
-    if (can_command_box && !j.is_discarded() && j.contains("print") && j["print"].value("command", "") == "print_option"
-        && j["print"].contains("auto_switch_filament")) {
-        const bool enabled = j["print"].value("auto_switch_filament", false);
-        // The settings page calls this from the main thread. The next status report shows what the box did.
-        std::thread([dev_ip = device_info.dev_ip, api_key = device_info.api_key, enabled] {
-            if (!make_host(dev_ip, api_key).set_auto_refill(enabled))
-                BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: the CFS did not confirm Auto Refill";
+    if (const json fields = can_command_box && !j.is_discarded() && j.contains("print") ? box_config_fields(j["print"]) : json::object();
+        !fields.empty()) {
+        // The settings page calls this from the main thread.
+        std::thread([dev_ip = device_info.dev_ip, api_key = device_info.api_key, fields] {
+            if (!make_host(dev_ip, api_key).set_box_config(fields))
+                BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: the CFS did not confirm " << fields.dump();
         }).detach();
         return BAMBU_NETWORK_SUCCESS;
     }

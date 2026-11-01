@@ -54,8 +54,11 @@ public:
     std::string model_name() const;
     // Starts a file already in the printer's gcodes folder, from extended_info as start_print_commands() reads it.
     bool start_print(wxString& msg, const std::string& filename, const std::map<std::string, std::string>& extended_info) const;
-    // Turns the box's own Auto Refill on or off. False when the printer did not confirm it.
-    bool set_auto_refill(bool enabled) const;
+    // The CFS settings: the "boxConfig" answer, or an empty string.
+    std::string query_box_config() const;
+    // Writes `fields` to the CFS settings. The box keeps the fields left out. False when the
+    // printer did not confirm it.
+    bool set_box_config(const nlohmann::json& fields) const;
     // The WebSocket commands that start gcode_path, built from the send dialog's
     // extended_info (enableSelfTest and the colorMatch_<n> slot mapping).
     static std::vector<std::string> start_print_commands(bool                                      multi_color,

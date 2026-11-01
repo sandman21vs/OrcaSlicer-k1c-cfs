@@ -94,6 +94,11 @@ public:
     // Klipper `box` object. A box that does not report one is left out.
     static void add_refill_status(const nlohmann::json& box, nlohmann::json& print);
 
+    // The boxConfig fields a device page settings command writes, or an empty object for any other
+    // command. "Insertion update" is the box's cAutoFeed and "Update on startup" its cSelfTest,
+    // both of which read the spools' tags.
+    static nlohmann::json box_config_fields(const nlohmann::json& print_cmd);
+
     // The script a K1-family box runs to load slot `slot_id` of box `ams_id` (both from 0), or to
     // unload whatever the toolhead holds when `load` is false. `nozzle_temp` is the temperature
     // the filament moves at; 0 or less takes the box's own default.
@@ -165,6 +170,8 @@ protected:
 private:
     // Tells the device page which slot feeds the toolhead.
     void report_loaded_slot(int loaded_slot);
+    // Tells the device page how the box reads tags, from a boxConfig answer.
+    void report_box_config(const std::string& response);
     int  set_cfs_slot(const nlohmann::json& print_cmd);
 
     // Whether the last filament sync found a K1-family board's box, the only CFS this agent knows

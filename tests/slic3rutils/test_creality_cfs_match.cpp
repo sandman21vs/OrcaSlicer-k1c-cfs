@@ -592,3 +592,14 @@ TEST_CASE("A fibre-filled filament keeps its whole type", "[CFS][Creality]")
     CHECK(CrealityPrintAgent::normalize_filament_type("PLA Silk") == "PLA");
     CHECK(CrealityPrintAgent::normalize_filament_type("PLA+") == "PLA");
 }
+
+TEST_CASE("The device page's CFS settings map onto the box config", "[CFS][Creality]")
+{
+    using json = nlohmann::json;
+
+    CHECK(CrealityPrintAgent::box_config_fields({{"command", "print_option"}, {"auto_switch_filament", true}}) == json{{"autoRefill", 1}});
+    CHECK(CrealityPrintAgent::box_config_fields({{"command", "ams_user_setting"}, {"tray_read_option", true}, {"startup_read_option", false}, {"calibrate_remain_flag", true}})
+          == json{{"cAutoFeed", 1}, {"cSelfTest", 0}});
+    CHECK(CrealityPrintAgent::box_config_fields({{"command", "print_option"}, {"sound_enable", true}}).empty());
+    CHECK(CrealityPrintAgent::box_config_fields({{"command", "ams_change_filament"}}).empty());
+}

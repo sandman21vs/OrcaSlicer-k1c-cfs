@@ -277,7 +277,7 @@ TEST_CASE("Querying the CFS slots acknowledges heartbeats in text frames", "[Cre
     CHECK(messages[1].payload == "ok");
 }
 
-TEST_CASE("Auto Refill is written to the box config and confirmed by its reply", "[CrealityPrint]")
+TEST_CASE("A CFS setting is written to the box config and confirmed by its reply", "[CrealityPrint]")
 {
     const bool enabled = GENERATE(true, false);
     CAPTURE(enabled);
@@ -285,7 +285,7 @@ TEST_CASE("Auto Refill is written to the box config and confirmed by its reply",
     FakeCrealityPrinter printer(Behavior::Answers, "K1C");
     const auto host = make_host(printer, 5s);
 
-    CHECK(host->set_auto_refill(enabled));
+    CHECK(host->set_box_config({{"autoRefill", enabled ? 1 : 0}}));
     const std::vector<Message> messages = printer.messages();
     REQUIRE(messages.size() == 2);
     CHECK(messages[0].text);
@@ -293,13 +293,13 @@ TEST_CASE("Auto Refill is written to the box config and confirmed by its reply",
           == nlohmann::json{{"method", "set"}, {"params", {{"boxConfig", {{"autoRefill", enabled ? 1 : 0}}}}}});
 }
 
-TEST_CASE("Auto Refill fails when the printer does not confirm it", "[CrealityPrint]")
+TEST_CASE("A CFS setting fails when the printer does not confirm it", "[CrealityPrint]")
 {
     FakeCrealityPrinter printer(GENERATE(Behavior::SilentBeforeHandshake, Behavior::Silent), "K1C");
     const auto host = make_host(printer, 200ms);
     bool result     = true;
 
-    CHECK(finishes_within(printer, 3s, [&] { result = host->set_auto_refill(true); }));
+    CHECK(finishes_within(printer, 3s, [&] { result = host->set_box_config({{"autoRefill", 1}}); }));
     CHECK_FALSE(result);
 }
 
