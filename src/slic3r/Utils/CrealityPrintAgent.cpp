@@ -1133,6 +1133,11 @@ int CrealityPrintAgent::set_cfs_slot(const json& cmd)
         }
     }
 
+    // A K1-family box applies only part of a clear, and leaves the slot's tag unread. Reading the
+    // tag again gives the slot back what the spool says.
+    if (material.is_clear() && can_command_box)
+        return command_ams_refresh_rfid(device_info.dev_id, cfs_index, slot_id, 0, true);
+
     if (!host.modify_material(build_modify_material(box_id, slot_id, material)))
         return BAMBU_NETWORK_ERR_CONNECT_FAILED;
 
