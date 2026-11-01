@@ -500,3 +500,38 @@ TEST_CASE("A filament mapped onto a slot the CFS does not report has no colour m
     CHECK_FALSE(CrealityPrintAgent::color_match_info(mapped_onto({3}), {cfs_slot(0, 1, 0, "PLA", "#000000")}).has_value());
     CHECK_FALSE(CrealityPrintAgent::color_match_info(mapped_onto({0}), {}).has_value());
 }
+
+TEST_CASE("Auto Refill groups come from the box's same_material field as slot bit masks", "[CFS][Creality]")
+{
+    const auto same_material = nlohmann::json::parse(R"([
+        ["101001", "0000000", ["T1A", "T1C"], "PLA"],
+        ["104001", "0FA7C0C", ["T1B"], "PLA"],
+        ["101001", "0FFFFFF", ["T2D"], "PLA"],
+        ["bad"],
+        ["101001", "0000000", ["T9A", "A", 5], "PLA"]])");
+
+    CHECK(CrealityPrintAgent::refill_groups(same_material) == std::vector<int>{0b0101, 0b0010, 1 << 7});
+    CHECK(CrealityPrintAgent::refill_groups(nlohmann::json("not a list")).empty());
+}
+
+TEST_CASE("The status report carries the box's Auto Refill state", "[CFS][Creality]")
+{
+    const int auto_refill = GENERATE(0, 1);
+    CAPTURE(auto_refill);
+    nlohmann::json print = {{"home_flag", 256}};
+
+    CrealityPrintAgent::add_refill_status({{"auto_refill", auto_refill}, {"same_material", {{"101001", "0000000", {"T1A", "T1C"}, "PLA"}}}}, print);
+
+    CHECK(print["support_filament_backup"] == true);
+    CHECK(print["home_flag"] == (auto_refill != 0 ? 256 | 1 << 10 : 256));
+    CHECK(print["filam_bak"] == nlohmann::json{0b0101});
+}
+
+TEST_CASE("A box that reports no Auto Refill state leaves the status report alone", "[CFS][Creality]")
+{
+    nlohmann::json print = {{"home_flag", 256}};
+
+    CrealityPrintAgent::add_refill_status({{"filament", 1}}, print);
+
+    CHECK(print == nlohmann::json{{"home_flag", 256}});
+}

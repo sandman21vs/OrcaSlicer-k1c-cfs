@@ -2339,6 +2339,7 @@ nlohmann::json MoonrakerPrinterAgent::build_print_payload_locked() const
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
     payload["t_utc"] = now_ms;
 
+    add_print_status(status_cache, payload["print"]);
     return payload;
 }
 

@@ -67,6 +67,13 @@ public:
     static std::optional<std::map<std::string, std::string>> color_match_info(const std::string&          ams_mapping_info,
                                                                               const std::vector<CFSSlot>& slots);
 
+    // The box's own Auto Refill groups, as the device page's filam_bak bit masks of slot indexes,
+    // from its `same_material` field: [[code, colour, ["T1A", "T1C"], type], ...].
+    static std::vector<int> refill_groups(const nlohmann::json& same_material);
+    // Adds to `print`, the status report the device page reads, the Auto Refill state of the
+    // Klipper `box` object. A box that does not report one is left out.
+    static void add_refill_status(const nlohmann::json& box, nlohmann::json& print);
+
     // The script a K1-family box runs to load slot `slot_id` of box `ams_id` (both from 0), or to
     // unload whatever the toolhead holds when `load` is false. `nozzle_temp` is the temperature
     // the filament moves at; 0 or less takes the box's own default.
@@ -105,6 +112,7 @@ protected:
     void on_printer_connected(const std::string& dev_id) override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
     void on_status_update(const std::string& dev_id, const nlohmann::json& updates) override;
+    void add_print_status(const nlohmann::json& status, nlohmann::json& print) const override;
     bool print_uploaded_file(const PrintParams& params, const std::string& filename) override;
 
 private:

@@ -394,6 +394,26 @@ std::string CrealityPrint::query_boxes_info() const
     }
 }
 
+bool CrealityPrint::set_auto_refill(bool enabled) const
+{
+    try {
+        net::io_context ioc;
+        websocket::stream<beast::tcp_stream> ws{ioc};
+        ws_connect(ioc, ws, m_host, ws_settings.port, ws_settings.connect);
+
+        beast::get_lowest_layer(ws).expires_after(ws_settings.reply);
+        // The box keeps the fields a command leaves out, and answers with all of them.
+        json cmd = {{"method", "set"}, {"params", {{"boxConfig", {{"autoRefill", enabled ? 1 : 0}}}}}};
+        const std::string reply = ws_send_and_read(ioc, ws, cmd, "boxConfig");
+
+        ws_close(ioc, ws, ws_settings.close);
+        return !reply.empty();
+    } catch (std::exception const& e) {
+        BOOST_LOG_TRIVIAL(error) << "CrealityPrint: Failed to set Auto Refill: " << e.what();
+        return false;
+    }
+}
+
 std::vector<std::string> CrealityPrint::start_print_commands(bool                                      multi_color,
                                                              const std::string&                        gcode_path,
                                                              const std::map<std::string, std::string>& extended_info)

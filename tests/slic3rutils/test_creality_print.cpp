@@ -146,6 +146,7 @@ private:
         }
 
         ws.text(true);
+        std::string command;
         // Reading also answers the client's close frame.
         for (bool first = true; !ec; first = false) {
             beast::flat_buffer message;
@@ -157,10 +158,13 @@ private:
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_messages.push_back({ws.got_text(), payload});
             }
-            if (first)
+            if (first) {
+                command = payload;
                 ws.write(net::buffer(std::string(R"({"ModeCode":"heart_beat"})")), ec);
-            else if (payload == "ok")
-                ws.write(net::buffer(std::string(R"({"boxsInfo":{"materialBoxs":[]}})")), ec);
+            } else if (payload == "ok") {
+                const bool box_config = command.find("boxConfig") != std::string::npos;
+                ws.write(net::buffer(std::string(box_config ? R"({"boxConfig":{"autoRefill":1}})" : R"({"boxsInfo":{"materialBoxs":[]}})")), ec);
+            }
         }
     }
 
@@ -271,6 +275,32 @@ TEST_CASE("Querying the CFS slots acknowledges heartbeats in text frames", "[Cre
     CHECK(nlohmann::json::parse(messages[0].payload) == nlohmann::json{{"method", "get"}, {"params", {{"boxsInfo", 1}}}});
     CHECK(messages[1].text);
     CHECK(messages[1].payload == "ok");
+}
+
+TEST_CASE("Auto Refill is written to the box config and confirmed by its reply", "[CrealityPrint]")
+{
+    const bool enabled = GENERATE(true, false);
+    CAPTURE(enabled);
+
+    FakeCrealityPrinter printer(Behavior::Answers, "K1C");
+    const auto host = make_host(printer, 5s);
+
+    CHECK(host->set_auto_refill(enabled));
+    const std::vector<Message> messages = printer.messages();
+    REQUIRE(messages.size() == 2);
+    CHECK(messages[0].text);
+    CHECK(nlohmann::json::parse(messages[0].payload)
+          == nlohmann::json{{"method", "set"}, {"params", {{"boxConfig", {{"autoRefill", enabled ? 1 : 0}}}}}});
+}
+
+TEST_CASE("Auto Refill fails when the printer does not confirm it", "[CrealityPrint]")
+{
+    FakeCrealityPrinter printer(GENERATE(Behavior::SilentBeforeHandshake, Behavior::Silent), "K1C");
+    const auto host = make_host(printer, 200ms);
+    bool result     = true;
+
+    CHECK(finishes_within(printer, 3s, [&] { result = host->set_auto_refill(true); }));
+    CHECK_FALSE(result);
 }
 
 TEST_CASE("Starting a print gives a silent printer no more than its deadlines", "[CrealityPrint]")

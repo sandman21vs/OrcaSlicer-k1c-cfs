@@ -226,6 +226,9 @@ protected:
     virtual void add_status_objects(const std::set<std::string>& /*available*/, std::set<std::string>& /*subscribe*/) const {}
     // Each status change the printer sends, on the status stream's thread.
     virtual void on_status_update(const std::string& /*dev_id*/, const nlohmann::json& /*updates*/) {}
+    // Adds to `print`, the status report the device page reads, what a subclass knows from `status`,
+    // the printer objects as last reported. Holds the agent's state lock.
+    virtual void add_print_status(const nlohmann::json& /*status*/, nlohmann::json& /*print*/) const {}
 
 private:
     int handle_request(const std::string& dev_id, const std::string& json_str);

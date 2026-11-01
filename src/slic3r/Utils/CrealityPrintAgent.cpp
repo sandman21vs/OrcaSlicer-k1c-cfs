@@ -24,6 +24,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 #include <utility>
 
@@ -347,6 +348,28 @@ std::optional<int> CrealityPrintAgent::parse_loaded_slot(const std::string& resp
     return loaded;
 }
 
+std::vector<int> CrealityPrintAgent::refill_groups(const json& same_material)
+{
+    std::vector<int> groups;
+    if (!same_material.is_array())
+        return groups;
+
+    for (const json& material : same_material) {
+        if (!material.is_array() || material.size() < 3 || !material[2].is_array())
+            continue;
+
+        int group = 0;
+        for (const json& slot : material[2]) {
+            const std::string name = slot.is_string() ? slot.get<std::string>() : "";
+            if (name.size() == 3 && name[0] == 'T' && name[1] >= '1' && name[1] <= '4' && name[2] >= 'A' && name[2] <= 'D')
+                group |= 1 << ((name[1] - '1') * 4 + (name[2] - 'A'));
+        }
+        if (group != 0)
+            groups.push_back(group);
+    }
+    return groups;
+}
+
 bool CrealityPrintAgent::box_update_changes_slots(const json& box_update, std::map<std::string, std::string>& seen)
 {
     if (!box_update.is_object())
@@ -387,6 +410,24 @@ void CrealityPrintAgent::on_status_update(const std::string& dev_id, const json&
     // without this app asking, so the slots are read again whenever the box reports it.
     if (updates.contains("box") && box_update_changes_slots(updates["box"], seen_box_fields))
         fetch_filament_info_on_main(dev_id);
+}
+
+void CrealityPrintAgent::add_print_status(const json& status, json& print) const
+{
+    if (can_command_box && status.contains("box"))
+        add_refill_status(status["box"], print);
+}
+
+void CrealityPrintAgent::add_refill_status(const json& box, json& print)
+{
+    if (!box.is_object() || !box.contains("auto_refill"))
+        return;
+
+    print["support_filament_backup"] = true;
+    if (box["auto_refill"].is_number() && box["auto_refill"].get<int>() != 0)
+        print["home_flag"] = print["home_flag"].get<int>() | (1 << 10);
+    if (box.contains("same_material"))
+        print["filam_bak"] = refill_groups(box["same_material"]);
 }
 
 std::optional<std::map<std::string, std::string>> CrealityPrintAgent::color_match_info(const std::string&          ams_mapping_info,
@@ -593,6 +634,17 @@ std::string CrealityPrintAgent::refresh_slot_gcode(int ams_id, int slot_id)
 int CrealityPrintAgent::send_message_to_printer(std::string dev_id, std::string json_str, int qos, int flag)
 {
     const json j = json::parse(json_str, nullptr, false);
+    if (can_command_box && !j.is_discarded() && j.contains("print") && j["print"].value("command", "") == "print_option"
+        && j["print"].contains("auto_switch_filament")) {
+        const bool enabled = j["print"].value("auto_switch_filament", false);
+        // The settings page calls this from the main thread. The next status report shows what the box did.
+        std::thread([dev_ip = device_info.dev_ip, api_key = device_info.api_key, enabled] {
+            if (!make_host(dev_ip, api_key).set_auto_refill(enabled))
+                BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: the CFS did not confirm Auto Refill";
+        }).detach();
+        return BAMBU_NETWORK_SUCCESS;
+    }
+
     if (!can_command_box || j.is_discarded() || !j.contains("print") || j["print"].value("command", "") != "ams_change_filament")
         return MoonrakerPrinterAgent::send_message_to_printer(std::move(dev_id), std::move(json_str), qos, flag);
 
