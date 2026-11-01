@@ -535,3 +535,60 @@ TEST_CASE("A box that reports no Auto Refill state leaves the status report alon
 
     CHECK(print == nlohmann::json{{"home_flag", 256}});
 }
+
+namespace {
+
+// A K1C reporting slots A and B, and slot D from a tag port 9999 leaves blank.
+const std::string k1c_box_response = R"({"result":{"status":{"box":{"same_material":[
+    ["101001","0FA7C0C",["T1A","T1B"],"PLA"],
+    ["106003","0611C8B",["T1D"],"PETG-CF"]]}}}})";
+
+} // namespace
+
+TEST_CASE("A slot port 9999 leaves blank is read from the box object", "[CFS][Creality]")
+{
+    std::vector<CrealityPrintAgent::CFSSlot> slots = {cfs_slot(0, 1, 0, "PLA", "#fa7c0c"), cfs_slot(0, 1, 1, "PLA", "#fa7c0c")};
+
+    CrealityPrintAgent::add_slots_from_box_object(k1c_box_response, slots);
+
+    REQUIRE(slots.size() == 3);
+    CHECK(slots[2].box_id == 0);
+    CHECK(slots[2].printer_box_id == 1);
+    CHECK(slots[2].slot_id == 3);
+    CHECK(slots[2].filament_type == "PETG-CF");
+    CHECK(slots[2].color_hex == "#611C8B");
+    CHECK(slots[2].remain == -1);
+}
+
+TEST_CASE("A slot from the box object can take a filament in the print dialog's mapping", "[CFS][Creality]")
+{
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+    CrealityPrintAgent::add_slots_from_box_object(k1c_box_response, slots);
+
+    const auto info = CrealityPrintAgent::color_match_info(mapped_onto({3}), slots);
+
+    REQUIRE(info.has_value());
+    CHECK(info->at("colorMatch_0") == "T1A\tPETG-CF\t#611C8B\t1\t3");
+}
+
+TEST_CASE("A slot the box does not list stays empty", "[CFS][Creality]")
+{
+    // The box drops a slot from same_material as soon as its spool runs out, though its old tag
+    // stays in the slot's own fields.
+    const std::string response = GENERATE(as<std::string>{}, "", "not json", R"({"result":{"status":{"box":{}}}})",
+                                           R"({"result":{"status":{"box":{"same_material":[["bad"],["101001","0FA7C0C",["T9A",5],"PLA"]]}}}})");
+    CAPTURE(response);
+    std::vector<CrealityPrintAgent::CFSSlot> slots;
+
+    CrealityPrintAgent::add_slots_from_box_object(response, slots);
+
+    CHECK(slots.empty());
+}
+
+TEST_CASE("A fibre-filled filament keeps its whole type", "[CFS][Creality]")
+{
+    CHECK(CrealityPrintAgent::normalize_filament_type("PETG-CF") == "PETG-CF");
+    CHECK(CrealityPrintAgent::normalize_filament_type("PA-GF") == "PA-GF");
+    CHECK(CrealityPrintAgent::normalize_filament_type("PLA Silk") == "PLA");
+    CHECK(CrealityPrintAgent::normalize_filament_type("PLA+") == "PLA");
+}

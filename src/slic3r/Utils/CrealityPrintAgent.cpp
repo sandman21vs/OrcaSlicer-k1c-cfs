@@ -11,6 +11,7 @@
 #include "slic3r/GUI/DeviceCore/DevExtruderSystem.h"
 #include "slic3r/GUI/DeviceCore/DevManager.h"
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/log/trivial.hpp>
 #include <wx/string.h>
 #include "libslic3r/Config.hpp"
@@ -37,6 +38,15 @@ namespace {
 constexpr const char* CrealityPrintAgent_VERSION = "0.1.0";
 
 // A CrealityPrint helper for its model detection and WebSocket commands (upstream PR #13291).
+// The slot index, four per box, of a box object's slot name such as "T1C", or -1 for anything else.
+int box_slot_index(const json& name)
+{
+    const std::string text = name.is_string() ? name.get<std::string>() : "";
+    if (text.size() != 3 || text[0] != 'T' || text[1] < '1' || text[1] > '4' || text[2] < 'A' || text[2] > 'D')
+        return -1;
+    return (text[1] - '1') * 4 + (text[2] - 'A');
+}
+
 CrealityPrint make_host(const std::string& dev_ip, const std::string& api_key)
 {
     DynamicPrintConfig cfg;
@@ -218,6 +228,9 @@ AgentInfo CrealityPrintAgent::get_agent_info_static()
 
 std::string CrealityPrintAgent::normalize_filament_type(const std::string& filament_type)
 {
+    if (boost::iends_with(filament_type, "-CF") || boost::iends_with(filament_type, "-GF"))
+        return filament_type;
+
     static const std::vector<std::string> bases = {
         "PETG", "PET", "PLA", "ABS", "ASA", "TPU", "PC", "PA", "PVA", "HIPS"
     };
@@ -348,6 +361,38 @@ std::optional<int> CrealityPrintAgent::parse_loaded_slot(const std::string& resp
     return loaded;
 }
 
+void CrealityPrintAgent::add_slots_from_box_object(const std::string& box_response, std::vector<CFSSlot>& slots)
+{
+    const json resp = json::parse(box_response, nullptr, false);
+    if (resp.is_discarded() || !resp.contains("result") || !resp["result"].contains("status") || !resp["result"]["status"].contains("box"))
+        return;
+
+    const json& box = resp["result"]["status"]["box"];
+    if (!box.contains("same_material") || !box["same_material"].is_array())
+        return;
+
+    for (const json& material : box["same_material"]) {
+        if (!material.is_array() || material.size() < 4 || !material[1].is_string() || !material[2].is_array() || !material[3].is_string())
+            continue;
+
+        for (const json& name : material[2]) {
+            const int index = box_slot_index(name);
+            if (index < 0 || std::any_of(slots.begin(), slots.end(), [index](const CFSSlot& s) { return s.box_id * 4 + s.slot_id == index; }))
+                continue;
+
+            // The box writes colours as a digit and RRGGBB, like port 9999 without its "#".
+            const std::string color = material[1].get<std::string>();
+            CFSSlot           slot;
+            slot.box_id         = index / 4;
+            slot.printer_box_id = slot.box_id + 1;
+            slot.slot_id        = index % 4;
+            slot.filament_type  = material[3].get<std::string>();
+            slot.color_hex      = "#" + (color.size() == 7 ? color.substr(1) : color);
+            slots.push_back(std::move(slot));
+        }
+    }
+}
+
 std::vector<int> CrealityPrintAgent::refill_groups(const json& same_material)
 {
     std::vector<int> groups;
@@ -360,9 +405,8 @@ std::vector<int> CrealityPrintAgent::refill_groups(const json& same_material)
 
         int group = 0;
         for (const json& slot : material[2]) {
-            const std::string name = slot.is_string() ? slot.get<std::string>() : "";
-            if (name.size() == 3 && name[0] == 'T' && name[1] >= '1' && name[1] <= '4' && name[2] >= 'A' && name[2] <= 'D')
-                group |= 1 << ((name[1] - '1') * 4 + (name[2] - 'A'));
+            if (const int index = box_slot_index(slot); index >= 0)
+                group |= 1 << index;
         }
         if (group != 0)
             groups.push_back(group);
@@ -472,6 +516,8 @@ bool CrealityPrintAgent::print_uploaded_file(const PrintParams& params, const st
     std::string          error;
     if (!parse_cfs_response(host.query_boxes_info(), slots, box_count, error))
         BOOST_LOG_TRIVIAL(warning) << "CrealityPrintAgent: CFS query failed before printing: " << error;
+    if (can_command_box)
+        add_slots_from_box_object(query_box_object(), slots);
 
     const auto info = color_match_info(params.ams_mapping_info, slots);
     if (!info) {
@@ -515,8 +561,9 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
 
     // Only a K1-family `box` object is known to take the commands Load, Unload and the slot refresh
     // send, and it alone names the slot feeding the toolhead, whichever way the slots are read.
-    const std::optional<int> loaded_slot = host.is_k1_family_board() ? parse_loaded_slot(query_box_object()) : std::nullopt;
-    can_command_box                      = loaded_slot.has_value();
+    const std::string        box_response = host.is_k1_family_board() ? query_box_object() : std::string();
+    const std::optional<int> loaded_slot  = parse_loaded_slot(box_response);
+    can_command_box                       = loaded_slot.has_value();
 
     const auto defer_to_base = [&] {
         const bool synced = MoonrakerPrinterAgent::fetch_filament_info(dev_id);
@@ -556,6 +603,8 @@ bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMod
             << "CrealityPrintAgent: no active CFS boxes, deferring to base agent";
         return defer_to_base();
     }
+
+    add_slots_from_box_object(box_response, slots);
 
     BOOST_LOG_TRIVIAL(info)
         << "CrealityPrintAgent: " << box_count << " CFS box(es), "
