@@ -1293,6 +1293,16 @@ void AMSMaterialsSetting::on_toggle_favorite_filament(wxCommandEvent& evt)
     m_favorites_regroup = true;
 }
 
+std::string AMSMaterialsSetting::printer_model() const
+{
+    // A printer behind a Moonraker agent has no device profile to name its model: it is the printer
+    // preset the user selected to reach it.
+    std::string model = DevPrinterConfigUtil::get_printer_display_name(obj->printer_type);
+    if (model.empty())
+        model = wxGetApp().preset_bundle->printers.get_edited_preset().config.opt_string("printer_model");
+    return model;
+}
+
 void AMSMaterialsSetting::Popup(wxString filament, wxString sn, wxString temp_min, wxString temp_max, wxString k, wxString n)
 {
     if (!obj) return;
@@ -1333,8 +1343,7 @@ void AMSMaterialsSetting::Popup(wxString filament, wxString sn, wxString temp_mi
 
     if (preset_bundle) {
         BOOST_LOG_TRIVIAL(trace) << "system_preset_bundle filament number=" << preset_bundle->filaments.size();
-        for (Preset *filament_it : preset_bundle->get_filament_presets_for_machine(
-                 DevPrinterConfigUtil::get_printer_display_name(obj->printer_type), nozzle_diameter_str, obj->is_support_user_preset)) {
+        for (Preset *filament_it : preset_bundle->get_filament_presets_for_machine(printer_model(), nozzle_diameter_str, obj->is_support_user_preset)) {
             if (!filament_id_set.insert(filament_it->filament_id).second)
                 continue;
             const std::string alias = preset_bundle->filaments.get_preset_alias(*filament_it, true);
@@ -1566,7 +1575,7 @@ int AMSMaterialsSetting::get_filament_variant_index(const Preset &filament, cons
     if (!obj || !preset_bundle)
         return 0;
     const std::set<std::string> printer_names =
-        preset_bundle->get_printer_names_by_printer_type_and_nozzle(DevPrinterConfigUtil::get_printer_display_name(obj->printer_type), nozzle_diameter_str);
+        preset_bundle->get_printer_names_by_printer_type_and_nozzle(printer_model(), nozzle_diameter_str);
     const Preset *printer = printer_names.empty() ? nullptr : preset_bundle->printers.find_preset(*printer_names.begin());
     if (!printer)
         return 0;
@@ -1605,7 +1614,7 @@ void AMSMaterialsSetting::on_select_filament(wxCommandEvent &evt)
         if (selected_info) {
             const std::string& filament_id = selected_info->filament_id;
             for (Preset *it : preset_bundle->get_filament_presets_for_machine(
-                     DevPrinterConfigUtil::get_printer_display_name(obj->printer_type), nozzle_diameter_str, obj->is_support_user_preset)) {
+                     printer_model(), nozzle_diameter_str, obj->is_support_user_preset)) {
                 if (it->filament_id != filament_id)
                     continue;
                 // ) if nozzle_temperature_range is found

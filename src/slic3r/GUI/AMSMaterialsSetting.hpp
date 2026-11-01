@@ -181,6 +181,8 @@ protected:
     void create_panel_normal(wxWindow* parent);
     void create_panel_kn(wxWindow* parent);
     void on_dpi_changed(const wxRect &suggested_rect) override;
+    // The printer's model name as printer presets spell it.
+    std::string printer_model() const;
     void on_select_filament(wxCommandEvent& evt);
     void on_toggle_favorite_filament(wxCommandEvent& evt);
     void on_select_cali_result(wxCommandEvent &evt);
