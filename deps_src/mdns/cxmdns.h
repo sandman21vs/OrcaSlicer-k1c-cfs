@@ -11,6 +11,6 @@ namespace cxnet
 		std::string answer;
 	};
 
-	std::vector<machine_info> syncDiscoveryService(const std::vector<std::string>& prefix);
+	std::vector<machine_info> syncDiscoveryService(const std::vector<std::string>& prefix, int wait_seconds = 5);
 }
 #endif

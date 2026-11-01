@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <utility>
@@ -26,22 +27,6 @@ bool is_cfs_capable(const std::string& code)
 std::string model_name_for(const std::string& code)
 {
     return CrealityPrint::model_display_name(code);
-}
-
-// Extract the device suffix from a service name like
-// "_Creality-543324280CDB19._udp.local." and synthesise a hostname-ish label
-// (e.g. "K2-DB19" using the last 4 hex of the MAC-derived suffix).
-std::string hostname_from_service(const std::string& service_name)
-{
-    auto dash = service_name.find_last_of('-');
-    if (dash == std::string::npos) return {};
-    auto dot = service_name.find('.', dash);
-    if (dot == std::string::npos) return {};
-    std::string suffix = service_name.substr(dash + 1, dot - dash - 1);
-    if (suffix.size() >= 4) {
-        return "K2-" + suffix.substr(suffix.size() - 4);
-    }
-    return suffix.empty() ? std::string{} : "K2-" + suffix;
 }
 
 // Synchronously probe http://<ip>/info for {model, mac}. Short timeout --
@@ -79,14 +64,32 @@ void probe_info(CrealityHost& host)
 
 } // namespace
 
-std::vector<CrealityHost> CrealityHostDiscovery::scan(bool probe)
+std::string CrealityHostDiscovery::host_label(const std::string& service_name, const std::string& model_name)
 {
+    auto dash = service_name.find_last_of('-');
+    if (dash == std::string::npos) return {};
+    auto dot = service_name.find('.', dash);
+    if (dot == std::string::npos) return {};
+    std::string suffix = service_name.substr(dash + 1, dot - dash - 1);
+    if (suffix.empty()) return {};
+    if (suffix.size() > 4)
+        suffix.erase(0, suffix.size() - 4);
+    return (model_name.empty() ? "Creality" : model_name) + "-" + suffix;
+}
+
+std::vector<CrealityHost> CrealityHostDiscovery::scan(bool probe, int wait_seconds)
+{
+    // The device page scans in the background while the printer dialog may scan too, and cxmdns
+    // keeps its buffers in statics
+    static std::mutex scan_mutex;
+    std::lock_guard<std::mutex> lock(scan_mutex);
+
     const std::vector<std::string> prefixes{ "Creality", "creality" };
 
     BOOST_LOG_TRIVIAL(info)
         << "CrealityHostDiscovery: starting DNS-SD discovery (prefixes: Creality, creality)";
 
-    auto raw = cxnet::syncDiscoveryService(prefixes);
+    auto raw = cxnet::syncDiscoveryService(prefixes, wait_seconds);
 
     BOOST_LOG_TRIVIAL(info)
         << "CrealityHostDiscovery: mDNS returned " << raw.size() << " match(es)";
@@ -98,7 +101,8 @@ std::vector<CrealityHost> CrealityHostDiscovery::scan(bool probe)
     // we capture both IPv4/IPv6 replies.
     std::vector<std::string> seen_ips;
     for (const auto& m : raw) {
-        if (m.machineIp.empty()) continue;
+        // A reply over IPv6 leaves only "[fe80" here, which is no address to use
+        if (m.machineIp.empty() || m.machineIp.front() == '[') continue;
         if (std::find(seen_ips.begin(), seen_ips.end(), m.machineIp) != seen_ips.end())
             continue;
         seen_ips.push_back(m.machineIp);
@@ -106,11 +110,11 @@ std::vector<CrealityHost> CrealityHostDiscovery::scan(bool probe)
         CrealityHost h;
         h.ip           = m.machineIp;
         h.service_name = m.answer;
-        h.hostname     = hostname_from_service(m.answer);
 
         if (probe) {
             probe_info(h);
         }
+        h.hostname = host_label(m.answer, h.model_name);
 
         hosts.push_back(std::move(h));
     }

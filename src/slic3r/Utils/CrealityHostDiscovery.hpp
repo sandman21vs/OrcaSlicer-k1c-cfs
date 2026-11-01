@@ -37,7 +37,12 @@ struct CrealityHost
 class CrealityHostDiscovery
 {
 public:
-    static std::vector<CrealityHost> scan(bool probe_info = true);
+    // `wait_seconds` is how long a quiet network is listened to before the scan ends.
+    static std::vector<CrealityHost> scan(bool probe_info = true, int wait_seconds = 5);
+
+    // A short name for a host, the same the printer announces when its model is known:
+    // "_Creality-18148428035E67._udp.local." on a K1C gives "K1C-5E67".
+    static std::string host_label(const std::string& service_name, const std::string& model_name);
 };
 
 } // namespace Slic3r

@@ -157,20 +157,20 @@ namespace cxnet
 						if (answer_name.find(item) != std::string::npos)
 							bFound = true;
 					}
-					if (!bFound)
+					if (bFound)
 					{
-						return;
+						char ip[16] = { 0 };
+						sscanf(fromaddrstr.str, "%[^:]", ip);
+						retmachineInfos.push_back({ ip, answer_name });
 					}
-
-					char ip[16] = { 0 };
-					sscanf(fromaddrstr.str, "%[^:]", ip);
-					retmachineInfos.push_back({ ip, answer_name });
 				}
 			}
+			// A reply can list several services, and the printer's need not be the first
+			data = (const uint16_t*)MDNS_POINTER_OFFSET(data, length);
 		}
 	}
 
-	std::vector<machine_info> syncDiscoveryService(const std::vector<std::string>& prefix)
+	std::vector<machine_info> syncDiscoveryService(const std::vector<std::string>& prefix, int wait_seconds)
 	{
 		std::vector<machine_info> retmachineInfos;
 		const char* hostname = "cxslice-host";
@@ -219,7 +219,7 @@ namespace cxnet
 		printf("Reading DNS-SD replies\n");
 		do {
 			struct timeval timeout;
-			timeout.tv_sec = 5;
+			timeout.tv_sec = wait_seconds;
 			timeout.tv_usec = 0;
 
 			int nfds = 0;

@@ -11,6 +11,7 @@
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/Utils/CrealityCfs.hpp"
+#include "slic3r/Utils/CrealityHostDiscovery.hpp"
 #include "slic3r/Utils/CrealityPrint.hpp"
 #include "slic3r/Utils/CrealityPrintAgent.hpp"
 
@@ -680,6 +681,14 @@ TEST_CASE("The printer's web server is reached whichever address was saved", "[C
     CHECK(CrealityPrint::web_host("http://192.168.1.5:7125/") == "http://192.168.1.5");
     CHECK(CrealityPrint::web_host("http://192.168.1.5/") == "http://192.168.1.5");
     CHECK(CrealityPrint::web_host("192.168.1.5:8080") == "192.168.1.5:8080");
+}
+
+TEST_CASE("A discovered printer is named after its model", "[CFS][Creality]")
+{
+    const std::string service = "_Creality-18148428035E67._udp.local.";
+    CHECK(CrealityHostDiscovery::host_label(service, "K1C") == "K1C-5E67");
+    CHECK(CrealityHostDiscovery::host_label(service, "") == "Creality-5E67");
+    CHECK(CrealityHostDiscovery::host_label("_printer._udp.local.", "K1C").empty());
 }
 
 TEST_CASE("A box's humidity falls in the level of its band", "[CFS][Creality]")

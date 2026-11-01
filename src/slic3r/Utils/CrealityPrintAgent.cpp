@@ -1,4 +1,5 @@
 #include "CrealityPrintAgent.hpp"
+#include "CrealityHostDiscovery.hpp"
 #include "CrealityPrint.hpp"
 #include "MoonrakerPrinterAgent.hpp"
 #include "bambu_networking.hpp"
@@ -744,13 +745,25 @@ void CrealityPrintAgent::report_printer_notice(int key, int previous_key)
 
 void CrealityPrintAgent::watch_printers()
 {
-    constexpr auto interval = std::chrono::seconds(20);
+    constexpr auto notice_interval = std::chrono::seconds(20);
+    constexpr auto scan_interval   = std::chrono::minutes(1);
+    constexpr int  scan_wait       = 2; // Seconds, short since the destructor waits for the scan
 
-    int                          shown_key = 0;
-    std::unique_lock<std::mutex> lock(watch_mutex);
+    int                                   shown_key = 0;
+    std::chrono::steady_clock::time_point next_scan;
+    std::unique_lock<std::mutex>          lock(watch_mutex);
     while (!watch_stop) {
-        watch_wake.wait_for(lock, interval, [this] { return watch_stop; });
-        if (watch_stop || notice_ip.empty() || !can_command_box)
+        if (scan_wanted || (discovering && std::chrono::steady_clock::now() >= next_scan)) {
+            scan_wanted = false;
+            next_scan   = std::chrono::steady_clock::now() + scan_interval;
+            lock.unlock();
+            add_found_printers(CrealityHostDiscovery::scan(/*probe_info=*/true, scan_wait));
+            lock.lock();
+            continue;
+        }
+
+        watch_wake.wait_for(lock, notice_interval, [this] { return watch_stop || scan_wanted; });
+        if (watch_stop || scan_wanted || notice_ip.empty() || !can_command_box)
             continue;
 
         const CrealityPrint host = make_host(notice_ip, notice_api_key);
@@ -762,6 +775,34 @@ void CrealityPrintAgent::watch_printers()
         }
         lock.lock();
     }
+}
+
+void CrealityPrintAgent::add_found_printers(std::vector<CrealityHost> hosts)
+{
+    run_on_main([hosts = std::move(hosts)] {
+        auto* dev_manager = GUI::wxGetApp().getDeviceManager();
+        if (!dev_manager)
+            return;
+
+        const auto known = dev_manager->get_local_machinelist();
+        for (const CrealityHost& host : hosts) {
+            const bool listed = std::any_of(known.begin(), known.end(), [&host](const auto& entry) {
+                // An address may name Moonraker's port
+                return entry.second && entry.second->get_dev_ip().substr(0, entry.second->get_dev_ip().find(':')) == host.ip;
+            });
+            if (!host.cfs_capable || listed)
+                continue;
+
+            BBLocalMachine machine;
+            machine.dev_id       = host.ip;
+            machine.dev_ip       = host.ip;
+            machine.dev_name     = host.hostname;
+            machine.printer_type = "Creality " + host.model_name;
+            // These printers take no access code. GUI_App::select_machine() fills in the same one.
+            dev_manager->insert_local_device(machine, "lan", "free", "", "88888888");
+            BOOST_LOG_TRIVIAL(info) << "CrealityPrintAgent: found " << host.hostname << " at " << host.ip;
+        }
+    });
 }
 
 std::string CrealityPrintAgent::moonraker_base_url(const std::string& base_url)
@@ -857,6 +898,19 @@ int CrealityPrintAgent::disconnect_printer()
         notice_ip.clear();
     }
     return MoonrakerPrinterAgent::disconnect_printer();
+}
+
+bool CrealityPrintAgent::start_discovery(bool start, bool sending)
+{
+    const bool started = MoonrakerPrinterAgent::start_discovery(start, sending);
+
+    std::lock_guard<std::mutex> lock(watch_mutex);
+    discovering = start;
+    scan_wanted = start;
+    if (start && !watch_thread.joinable() && !watch_stop)
+        watch_thread = std::thread([this] { watch_printers(); });
+    watch_wake.notify_all();
+    return started;
 }
 
 bool CrealityPrintAgent::fetch_filament_info(std::string dev_id, FilamentSyncMode /*sync_mode*/)

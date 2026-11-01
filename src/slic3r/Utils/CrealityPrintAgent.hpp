@@ -20,6 +20,7 @@
 namespace Slic3r {
 
 class PresetCollection;
+struct CrealityHost;
 
 // Filament sync for Creality K-series printers with CFS.
 //
@@ -188,6 +189,7 @@ public:
 protected:
     void on_printer_connected(const std::string& dev_id) override;
     int  disconnect_printer() override;
+    bool start_discovery(bool start, bool sending) override;
     void add_ams_unit_status(int ams_id, nlohmann::json& ams_unit) const override;
     std::string alternative_base_url(const std::string& base_url) const override;
     void add_status_objects(const std::set<std::string>& available, std::set<std::string>& subscribe) const override;
@@ -203,9 +205,12 @@ private:
     void report_printer_message(std::string message);
     // Shows notice `key` on the print progress, or clears notice `previous_key` when `key` is 0.
     void report_printer_notice(int key, int previous_key);
-    // Until the agent is destroyed, asks a K1-family printer for the notice on its screen. Moonraker
-    // does not carry those notices, and port 9999 is only read when something asks it.
+    // Until the agent is destroyed, looks for printers on the network while discovery runs and asks
+    // a K1-family printer for the notice on its screen. Moonraker does not carry those notices, and
+    // port 9999 is only read when something asks it.
     void watch_printers();
+    // Adds to the device page's list each CFS-capable printer of `hosts` that is not on it yet.
+    void add_found_printers(std::vector<CrealityHost> hosts);
     // Tells the device page how the box reads tags, from a boxConfig answer.
     void report_box_config(const std::string& response);
     int  set_cfs_slot(const nlohmann::json& print_cmd);
@@ -223,7 +228,9 @@ private:
     std::thread             watch_thread;
     std::mutex              watch_mutex;
     std::condition_variable watch_wake;
-    bool                    watch_stop = false;
+    bool                    watch_stop  = false;
+    bool                    discovering = false;
+    bool                    scan_wanted = false;
     std::string             notice_ip;  // Empty while no printer is connected
     std::string             notice_api_key;
 };
